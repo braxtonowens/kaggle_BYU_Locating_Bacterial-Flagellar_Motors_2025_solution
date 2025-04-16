@@ -150,6 +150,6 @@ class CziiCollector():
 if __name__ == "__main__":
     dataset_author='Morgan Beeby'
     dataset_author='Ariane Briegel'
-    dataset_author='Yi-Wei Chang'
+    # dataset_author='Yi-Wei Chang'
     p = CziiCollector(dataset_author=dataset_author)
     p.run()
