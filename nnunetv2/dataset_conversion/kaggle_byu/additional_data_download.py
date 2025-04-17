@@ -17,7 +17,7 @@ class CziiCollector():
             out_dir: str = "/media/isensee/data/kaggle_byu_additional_data/data/",
             labels_csv: str = '/home/isensee/git_repos/nnu-netv2/nnunetv2/dataset_conversion/kaggle_byu/labels.csv',
             dataset_author: str = 'Yi-Wei Chang',
-            num_threads: int = 12
+            num_threads: int = 6
     ):
         super().__init__()
         self.tmp_dir = tmp_dir
@@ -149,7 +149,7 @@ class CziiCollector():
 
 if __name__ == "__main__":
     dataset_author='Morgan Beeby'
-    dataset_author='Ariane Briegel'
+    # dataset_author='Ariane Briegel'
     # dataset_author='Yi-Wei Chang'
     p = CziiCollector(dataset_author=dataset_author)
     p.run()
