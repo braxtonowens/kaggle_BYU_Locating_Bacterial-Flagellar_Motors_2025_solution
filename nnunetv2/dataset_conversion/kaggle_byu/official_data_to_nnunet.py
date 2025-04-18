@@ -39,9 +39,9 @@ def convert_coordinates(coordinates_in_original, original_shape, new_shape):
 def generate_segmentation(shape, coordinates, radius: int = 2):
     sphere = generate_ball([radius] * 3, dtype=np.uint8)
     seg = np.zeros(shape, dtype=np.uint8)
-    for ci in coordinates:
+    for lb, ci in enumerate(coordinates):
         bbox = [[i - radius, i + radius + 1] for i in ci]
-        insert_crop_into_image(seg, sphere, bbox)
+        insert_crop_into_image(seg, sphere * (lb + 1), bbox)
     return seg
 
 
@@ -91,7 +91,7 @@ if __name__ == '__main__':
         new_coords[iden] = coords_reshaped
         orig_coords[iden] = coords_orig
         orig_shapes[iden] = orig_shape
-        seg = generate_segmentation(image.shape, coords_reshaped, 4)
+        seg = generate_segmentation(image.shape, coords_reshaped, 6)
 
         sitk.WriteImage(sitk.GetImageFromArray(image), join(imagestr, iden + '_0000.nii.gz'))
         sitk.WriteImage(sitk.GetImageFromArray(seg), join(labelstr, iden + '.nii.gz'))
@@ -106,7 +106,8 @@ if __name__ == '__main__':
     save_json(orig_coords, join(out_base, 'train_coordinates_forOrigShapes.json'), sort_keys=False)
     save_json(orig_shapes, join(out_base, 'train_OrigShapes.json'), sort_keys=False)
 
-    generate_dataset_json(out_base, {0: 'cryoET'}, {'background': 0, 'motor': 1},
+    n_motors = [len(v) for v in orig_coords.values()]
+    generate_dataset_json(out_base, {0: 'cryoET'}, {'background': 0, **{f'motor_{i}': i for i in range(1, max(n_motors) + 1)}},
                           len(identifiers), '.nii.gz', citation=None, dataset_name=task_name,
                           reference='https://www.kaggle.com/competitions/byu-locating-bacterial-flagellar-motors-2025/data',
                           release=None, license='MIT', converted_by='Fabian Isensee')
@@ -123,3 +124,14 @@ if __name__ == '__main__':
 
         sitk.WriteImage(sitk.GetImageFromArray(image), join(imagests, iden + '_0000.nii.gz'))
     save_json(orig_shapes, join(out_base, 'test_OrigShapes.json'), sort_keys=False)
+
+    # i determined the radius for the segmentation based off of that
+    # min_dist = 99999
+    # for c in new_coords.keys():
+    #     n = len(new_coords[c])
+    #     if n >= 2:
+    #         for i in range(n):
+    #             for j in range(i + 1, n):
+    #                 dist = np.linalg.norm(np.array(new_coords[c][i]) - np.array(new_coords[c][j]))
+    #                 if dist < min_dist:
+    #                     min_dist = dist
