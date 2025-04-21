@@ -93,3 +93,13 @@ class Nonlin_MSE_loss(nn.Module):
     def forward(self, net_output: torch.Tensor, target: torch.Tensor):
         net_output = self.nonlinearity(net_output)
         return self.mse(net_output, target)
+
+class Nonlin_RegDice_loss(nn.Module):
+    def __init__(self, regdice, nonlinearity=F.sigmoid):
+        super().__init__()
+        self.nonlinearity = nonlinearity
+        self.regdice = regdice
+
+    def forward(self, net_output: torch.Tensor, target: torch.Tensor):
+        net_output = self.nonlinearity(net_output)
+        return self.regdice(net_output, target)

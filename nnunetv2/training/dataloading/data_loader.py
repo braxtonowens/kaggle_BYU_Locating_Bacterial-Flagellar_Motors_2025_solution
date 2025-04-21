@@ -27,13 +27,16 @@ class nnUNetDataLoader(DataLoader):
                  sampling_probabilities: Union[List[int], Tuple[int, ...], np.ndarray] = None,
                  pad_sides: Union[List[int], Tuple[int, ...]] = None,
                  probabilistic_oversampling: bool = False,
-                 transforms=None):
+                 transforms=None,
+                 random_offset: Tuple[int] = None):
         """
         If we get a 2D patch size, make it pseudo 3D and remember to remove the singleton dimension before
         returning the batch
         """
         super().__init__(data, batch_size, 1, None, True,
                          False, True, sampling_probabilities)
+
+        self.random_offset = random_offset
 
         if len(patch_size) == 2:
             final_patch_size = (1, *patch_size)
@@ -152,6 +155,19 @@ class nnUNetDataLoader(DataLoader):
             if selected_class is not None:
                 voxels_of_that_class = class_locations[selected_class]
                 selected_voxel = voxels_of_that_class[np.random.choice(len(voxels_of_that_class))]
+
+                if self.random_offset is not None:
+                    ####################################################################################
+                    # Apply random offset to center voxel. Center voxel must stay within the image
+                    allowed_max_neg_offset = [min(ro, s) for s, ro in zip(selected_voxel[1:], self.random_offset)]
+                    allowed_max_pos_offset = [min(d - s, ro) for s, d, ro in
+                                              zip(selected_voxel[1:], data_shape, self.random_offset)]
+
+                    for d in range(len(self.patch_size)):
+                        selected_voxel[d + 1] += np.random.randint(-allowed_max_neg_offset[d],
+                                                                   allowed_max_pos_offset[d] + 1)
+                    ####################################################################################
+
                 # selected voxel is center voxel. Subtract half the patch size to get lower bbox voxel.
                 # Make sure it is within the bounds of lb and ub
                 # i + 1 because we have first dimension 0!

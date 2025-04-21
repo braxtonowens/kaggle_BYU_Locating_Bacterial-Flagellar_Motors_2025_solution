@@ -19,7 +19,8 @@ from nnunetv2.training.data_augmentation.kaggle_2025_byu import ConvertSegToRegr
 from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.dataloading.nnunet_dataset import infer_dataset_class
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
-from nnunetv2.training.loss.regression import RegDice_and_MSE_loss, RegDice1, Nonlin_MSE_loss
+from nnunetv2.training.loss.regression import RegDice_and_MSE_loss, RegDice1, Nonlin_MSE_loss, Nonlin_RegDice_loss, \
+    RegDice3
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.collate_outputs import collate_outputs
 from nnunetv2.utilities.default_n_proc_DA import get_allowed_n_proc_DA
@@ -28,6 +29,11 @@ from torch.nn import functional as F
 
 
 class MotorRegressionTrainer(nnUNetTrainer):
+    def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
+                 device: torch.device = torch.device('cuda')):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        self.save_every = 5
+
     @staticmethod
     def get_training_transforms(
             patch_size: Union[np.ndarray, Tuple[int]],
@@ -47,7 +53,7 @@ class MotorRegressionTrainer(nnUNetTrainer):
         assert isinstance(transforms.transforms[-1], DownsampleSegForDSTransform)
         transforms.transforms.pop(-1)
 
-
+        transforms.transforms[0].mode_seg = 'nearest'
         transforms.transforms.append(ConvertSegToRegrTarget('EDT', gaussian_sigma=5,
                                                             edt_radius=15, min_segmentation_size=10))
         transforms.transforms.append(DownsampleSegForDSTransform(deep_supervision_scales))
@@ -76,8 +82,8 @@ class MotorRegressionTrainer(nnUNetTrainer):
         return transforms
 
     def _build_loss(self):
-        loss = Nonlin_MSE_loss()
-        # loss = MSELoss(reduction='mean')
+        # loss = Nonlin_MSE_loss()
+        loss = RegDice_and_MSE_loss(regdice=RegDice1())
 
         # if self._do_i_compile():
         #     loss.dc = torch.compile(loss.soft_dice)
@@ -145,14 +151,16 @@ class MotorRegressionTrainer(nnUNetTrainer):
                                  self.label_manager,
                                  oversample_foreground_percent=self.oversample_foreground_percent,
                                  sampling_probabilities=None, pad_sides=None, transforms=tr_transforms,
-                                 probabilistic_oversampling=self.probabilistic_oversampling)
+                                 probabilistic_oversampling=self.probabilistic_oversampling,
+                                 random_offset=[i // 3 for i in self.configuration_manager.patch_size])
         dl_val = nnUNetDataLoader(dataset_val, self.batch_size,
                                   self.configuration_manager.patch_size,
                                   self.configuration_manager.patch_size,
                                   self.label_manager,
                                   oversample_foreground_percent=self.oversample_foreground_percent,
                                   sampling_probabilities=None, pad_sides=None, transforms=val_transforms,
-                                  probabilistic_oversampling=self.probabilistic_oversampling)
+                                  probabilistic_oversampling=self.probabilistic_oversampling,
+                                  random_offset=[i // 3 for i in self.configuration_manager.patch_size])
 
         allowed_num_processes = get_allowed_n_proc_DA()
         if allowed_num_processes == 0:
@@ -194,8 +202,8 @@ class MotorRegressionTrainer(nnUNetTrainer):
         ### ema logs val loss here, lower is better
         self.logger.log('epoch_end_timestamps', time(), self.current_epoch)
 
-        self.print_to_log_file('train_loss', np.round(self.logger.my_fantastic_logging['train_losses'][-1], decimals=4))
-        self.print_to_log_file('val_loss', np.round(self.logger.my_fantastic_logging['val_losses'][-1], decimals=4))
+        self.print_to_log_file('train_loss', np.round(self.logger.my_fantastic_logging['train_losses'][-1], decimals=6))
+        self.print_to_log_file('val_loss', np.round(self.logger.my_fantastic_logging['val_losses'][-1], decimals=6))
         # self.print_to_log_file('Pseudo dice', [np.round(i, decimals=4) for i in
         #                                        self.logger.my_fantastic_logging['dice_per_class_or_region'][-1]])
         self.print_to_log_file(
@@ -256,11 +264,96 @@ class MotorRegressionTrainer(nnUNetTrainer):
             l = self.loss(output, target)
         # import IPython;IPython.embed()
         # if False:
-        #     idx = 1
-        #     from batchviewer import view_batch
-        #     tmp = F.sigmoid(output[0][idx, 0])
-        #     print(tmp.max())
-        #     view_batch(data[idx, 0], target[0][idx, 0], tmp)
-        #     quit()
+            # idx = 1
+            # from batchviewer import view_batch
+            # tmp = F.sigmoid(output[0][idx, 0])
+            # print(tmp.max())
+            # view_batch(data[idx, 0], target[0][idx, 0], tmp)
+            # quit()
 
         return {'loss': l.detach().cpu().numpy()}
+
+
+class MotorRegressionTrainer_MSELoss(MotorRegressionTrainer):
+    def _build_loss(self):
+        loss = Nonlin_MSE_loss()
+        # loss = RegDice_and_MSE_loss(regdice=RegDice1())
+
+        # if self._do_i_compile():
+        #     loss.dc = torch.compile(loss.soft_dice)
+
+        # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
+        # this gives higher resolution outputs more weight in the loss
+
+        if self.enable_deep_supervision:
+            deep_supervision_scales = self._get_deep_supervision_scales()
+            weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
+            if self.is_ddp and not self._do_i_compile():
+                # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
+                # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
+                # Anywho, the simple fix is to set a very low weight to this.
+                weights[-1] = 1e-6
+            else:
+                weights[-1] = 0
+
+            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
+            weights = weights / weights.sum()
+            # now wrap the loss
+            loss = DeepSupervisionWrapper(loss, weights)
+        return loss
+
+
+class MotorRegressionTrainer_RegDice1(MotorRegressionTrainer):
+    def _build_loss(self):
+        loss = Nonlin_RegDice_loss(RegDice1(), F.sigmoid)
+
+        # if self._do_i_compile():
+        #     loss.dc = torch.compile(loss.soft_dice)
+
+        # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
+        # this gives higher resolution outputs more weight in the loss
+
+        if self.enable_deep_supervision:
+            deep_supervision_scales = self._get_deep_supervision_scales()
+            weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
+            if self.is_ddp and not self._do_i_compile():
+                # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
+                # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
+                # Anywho, the simple fix is to set a very low weight to this.
+                weights[-1] = 1e-6
+            else:
+                weights[-1] = 0
+
+            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
+            weights = weights / weights.sum()
+            # now wrap the loss
+            loss = DeepSupervisionWrapper(loss, weights)
+        return loss
+
+class MotorRegressionTrainer_RegDice3(MotorRegressionTrainer):
+    def _build_loss(self):
+        loss = Nonlin_RegDice_loss(RegDice3(), F.sigmoid)
+
+        # if self._do_i_compile():
+        #     loss.dc = torch.compile(loss.soft_dice)
+
+        # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
+        # this gives higher resolution outputs more weight in the loss
+
+        if self.enable_deep_supervision:
+            deep_supervision_scales = self._get_deep_supervision_scales()
+            weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
+            if self.is_ddp and not self._do_i_compile():
+                # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
+                # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
+                # Anywho, the simple fix is to set a very low weight to this.
+                weights[-1] = 1e-6
+            else:
+                weights[-1] = 0
+
+            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
+            weights = weights / weights.sum()
+            # now wrap the loss
+            loss = DeepSupervisionWrapper(loss, weights)
+        return loss
+
