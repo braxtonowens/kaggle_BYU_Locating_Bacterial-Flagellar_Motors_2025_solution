@@ -273,7 +273,6 @@ class MotorRegressionTrainer(nnUNetTrainer):
 
         return {'loss': l.detach().cpu().numpy()}
 
-
 class MotorRegressionTrainer_MSELoss(MotorRegressionTrainer):
     def _build_loss(self):
         loss = Nonlin_MSE_loss()
@@ -301,7 +300,6 @@ class MotorRegressionTrainer_MSELoss(MotorRegressionTrainer):
             # now wrap the loss
             loss = DeepSupervisionWrapper(loss, weights)
         return loss
-
 
 class MotorRegressionTrainer_RegDice1(MotorRegressionTrainer):
     def _build_loss(self):
@@ -333,6 +331,34 @@ class MotorRegressionTrainer_RegDice1(MotorRegressionTrainer):
 class MotorRegressionTrainer_RegDice3(MotorRegressionTrainer):
     def _build_loss(self):
         loss = Nonlin_RegDice_loss(RegDice3(), F.sigmoid)
+
+        # if self._do_i_compile():
+        #     loss.dc = torch.compile(loss.soft_dice)
+
+        # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
+        # this gives higher resolution outputs more weight in the loss
+
+        if self.enable_deep_supervision:
+            deep_supervision_scales = self._get_deep_supervision_scales()
+            weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
+            if self.is_ddp and not self._do_i_compile():
+                # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
+                # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
+                # Anywho, the simple fix is to set a very low weight to this.
+                weights[-1] = 1e-6
+            else:
+                weights[-1] = 0
+
+            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
+            weights = weights / weights.sum()
+            # now wrap the loss
+            loss = DeepSupervisionWrapper(loss, weights)
+        return loss
+
+
+class MotorRegressionTrainer_MSERegDice3(MotorRegressionTrainer):
+    def _build_loss(self):
+        loss = RegDice_and_MSE_loss(regdice=RegDice3())
 
         # if self._do_i_compile():
         #     loss.dc = torch.compile(loss.soft_dice)
