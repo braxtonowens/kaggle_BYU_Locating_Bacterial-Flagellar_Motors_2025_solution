@@ -4,6 +4,10 @@ from copy import deepcopy
 import SimpleITK
 from batchgenerators.dataloading.nondet_multi_threaded_augmenter import NonDetMultiThreadedAugmenter
 from batchgenerators.dataloading.single_threaded_augmenter import SingleThreadedAugmenter
+from challenge2025_kaggle_byu_flagellarmotors.evaluation.compute_fbeta import compute_f_beta
+from challenge2025_kaggle_byu_flagellarmotors.instance_seg_to_regression_target.fabians_transform import \
+    ConvertSegToRegrTarget
+from challenge2025_kaggle_byu_flagellarmotors.utils.gaussian_blur import GaussianBlur3D
 from nnInteractive.utils.erosion_dilation import iterative_3x3_same_padding_pool3d
 from torch import distributed as dist, autocast
 from time import time, sleep
@@ -11,7 +15,7 @@ from typing import Union, Tuple, List
 
 import numpy as np
 import torch
-from batchgenerators.utilities.file_and_folder_operations import join, maybe_mkdir_p, save_json
+from batchgenerators.utilities.file_and_folder_operations import join, maybe_mkdir_p, save_json, load_json
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
@@ -19,8 +23,9 @@ from batchgeneratorsv2.transforms.utils.deep_supervision_downsampling import Dow
 from torch import nn
 
 from nnunetv2.configuration import default_num_processes
+from nnunetv2.dataset_conversion.kaggle_byu.official_data_to_nnunet import convert_coordinates
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
-from nnunetv2.training.data_augmentation.kaggle_2025_byu import ConvertSegToRegrTarget
+from nnunetv2.paths import nnUNet_raw
 from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.dataloading.nnunet_dataset import infer_dataset_class
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
@@ -33,50 +38,6 @@ from nnunetv2.utilities.file_path_utilities import check_workers_alive_and_busy
 from nnunetv2.utilities.helpers import dummy_context
 from torch.nn import functional as F
 
-
-class GaussianBlur3D:
-    def __init__(self, sigma: float, truncate: float = 4.0, device=None):
-        self.sigma = sigma
-        self.truncate = truncate
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.kernel_z, self.kernel_y, self.kernel_x = self._get_separable_gaussian_kernels_3d(sigma, truncate)
-        self.kernel_z = self.kernel_z.to(self.device)
-        self.kernel_y = self.kernel_y.to(self.device)
-        self.kernel_x = self.kernel_x.to(self.device)
-
-    @staticmethod
-    def _gaussian_1d_kernel(sigma: float, truncate: float) -> torch.Tensor:
-        radius = int(truncate * sigma + 0.5)
-        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
-        kernel = torch.exp(-0.5 * (x / sigma) ** 2)
-        kernel /= kernel.sum()
-        return kernel.view(1, 1, -1)  # Shape: [1, 1, k]
-
-    def _get_separable_gaussian_kernels_3d(self, sigma: float, truncate: float):
-        kernel_1d = self._gaussian_1d_kernel(sigma, truncate)  # [1, 1, k]
-        k = kernel_1d.shape[-1]
-
-        kernel_z = kernel_1d.view(1, 1, k, 1, 1)
-        kernel_y = kernel_1d.view(1, 1, 1, k, 1)
-        kernel_x = kernel_1d.view(1, 1, 1, 1, k)
-
-        return kernel_z, kernel_y, kernel_x
-
-    def apply(self, volume: torch.Tensor) -> torch.Tensor:
-        # Padding sizes
-        pad_z = self.kernel_z.shape[2] // 2
-        pad_y = self.kernel_y.shape[3] // 2
-        pad_x = self.kernel_x.shape[4] // 2
-
-        # Pad the input tensor: (W, H, D) order
-        volume = F.pad(volume, (pad_x, pad_x, pad_y, pad_y, pad_z, pad_z), mode='replicate')
-
-        # Apply depthwise separable convolutions
-        volume = F.conv3d(volume, self.kernel_z, groups=volume.shape[1], padding=0)
-        volume = F.conv3d(volume, self.kernel_y, groups=volume.shape[1], padding=0)
-        volume = F.conv3d(volume, self.kernel_x, groups=volume.shape[1], padding=0)
-
-        return volume
 
 class MotorRegressionTrainer(nnUNetTrainer):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
@@ -98,8 +59,8 @@ class MotorRegressionTrainer(nnUNetTrainer):
             ignore_label: int = None,
     ) -> BasicTransform:
         transforms: ComposeTransforms = nnUNetTrainer.get_training_transforms(patch_size, rotation_for_DA, deep_supervision_scales,
-                                                           mirror_axes, do_dummy_2d_data_aug, use_mask_for_norm,
-                                                           is_cascaded, foreground_labels, regions, ignore_label)
+                                                                              mirror_axes, do_dummy_2d_data_aug, use_mask_for_norm,
+                                                                              is_cascaded, foreground_labels, regions, ignore_label)
         assert isinstance(transforms.transforms[-1], DownsampleSegForDSTransform)
         transforms.transforms.pop(-1)
 
@@ -111,12 +72,12 @@ class MotorRegressionTrainer(nnUNetTrainer):
         return transforms
 
     def get_validation_transforms(self,
-            deep_supervision_scales: Union[List, Tuple, None],
-            is_cascaded: bool = False,
-            foreground_labels: Union[Tuple[int, ...], List[int]] = None,
-            regions: List[Union[List[int], Tuple[int, ...], int]] = None,
-            ignore_label: int = None,
-    ) -> BasicTransform:
+                                  deep_supervision_scales: Union[List, Tuple, None],
+                                  is_cascaded: bool = False,
+                                  foreground_labels: Union[Tuple[int, ...], List[int]] = None,
+                                  regions: List[Union[List[int], Tuple[int, ...], int]] = None,
+                                  ignore_label: int = None,
+                                  ) -> BasicTransform:
         transforms: ComposeTransforms = nnUNetTrainer.get_validation_transforms(deep_supervision_scales, is_cascaded,
                                                                                 foreground_labels, regions,
                                                                                 ignore_label)
@@ -239,8 +200,8 @@ class MotorRegressionTrainer(nnUNetTrainer):
                                    enable_deep_supervision: bool = True) -> nn.Module:
         num_output_channels = 1
         net = nnUNetTrainer.build_network_architecture(architecture_class_name, arch_init_kwargs,
-                                                        arch_init_kwargs_req_import, num_input_channels,
-                                                        num_output_channels, enable_deep_supervision)
+                                                       arch_init_kwargs_req_import, num_input_channels,
+                                                       num_output_channels, enable_deep_supervision)
         return net
 
     def perform_actual_validation(self, save_probabilities: bool = False):
@@ -269,6 +230,7 @@ class MotorRegressionTrainer(nnUNetTrainer):
                                         self.inference_allowed_mirroring_axes)
 
         gb = GaussianBlur3D(2, 3, self.device)
+        orig_shapes = load_json(join(nnUNet_raw, self.plans_manager.dataset_name, 'train_OrigShapes.json'))
 
         with multiprocessing.get_context("spawn").Pool(default_num_processes) as export_pool:
             worker_list = [i for i in export_pool._pool]
@@ -289,6 +251,7 @@ class MotorRegressionTrainer(nnUNetTrainer):
 
             results = []
 
+            import IPython;IPython.embed()
             for i, k in enumerate(dataset_val.identifiers):
                 proceed = not check_workers_alive_and_busy(export_pool, worker_list, results,
                                                            allowed_num_queued=2)
@@ -326,6 +289,9 @@ class MotorRegressionTrainer(nnUNetTrainer):
                 det_p = [prediction[*i].item() for i in detected_coords]
                 detected_coords = [[i.item() for i in j] for j in detected_coords]
 
+                # convert coords to original
+                coords_in_orig_shape = convert_coordinates(detected_coords, prediction.shape, orig_shapes[k])
+
                 # save raw prediction, found motors with their probs, motor_map
 
                 # raw prediction
@@ -339,10 +305,57 @@ class MotorRegressionTrainer(nnUNetTrainer):
                 SimpleITK.WriteImage(tmp, output_filename_truncated + '_detections.nii.gz')
 
                 # coordinates and probabilities
-                save_json({'coordinates': detected_coords, 'probabilities': det_p}, output_filename_truncated + '.json')
+                save_json({'coordinates': detected_coords, 'coordinates_orig_shape': coords_in_orig_shape, 'probabilities': det_p}, output_filename_truncated + '.json')
 
         # todo evaluation
+        gt = load_json(join(nnUNet_raw, self.plans_manager.dataset_name, 'train_coordinates.json'))
+        gt_list = [np.array(gt[k]) for k in val_keys]
+        preds = [load_json(join(validation_output_folder, k + '.json')) for k in val_keys]
 
+        probs = np.linspace(MIN_P, 1, num=200) #np.unique([j for i in preds for j in i['probabilities']])
+        fbeta = []
+        for threshold in probs:
+            pred_list_here = []
+            for i in range(len(preds)):
+                pred_list_here.append(np.array([preds[i]['coordinates'][j] for j in range(len(preds[i]['probabilities'])) if preds[i]['probabilities'][j] > threshold]))
+            # we need to threshold the prediction
+            fbeta.append(compute_f_beta(pred_list_here, gt_list, 2, 35))
+
+        import seaborn as sns
+        # Plot using seaborn
+        sns.set(style="whitegrid", context="talk")
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(10, 6))
+        sns.lineplot(x=probs, y=fbeta, marker='o')
+        plt.xlabel("Probability Threshold", fontsize=14)
+        plt.ylabel("F\u03B2 Score (β=2)", fontsize=14)
+        plt.title("F\u03B2 Score vs Probability Threshold", fontsize=16)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.tight_layout()
+        plt.savefig(join(validation_output_folder, 'f2_vs_threshold.png'))
+
+        fbeta_2 = []
+        probs2 = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        for threshold in probs2:
+            pred_list_here = []
+            for i in range(len(preds)):
+                pred_list_here.append(np.array([preds[i]['coordinates'][j] for j in range(len(preds[i]['probabilities'])) if preds[i]['probabilities'][j] > threshold]))
+            # we need to threshold the prediction
+            fbeta_2.append(compute_f_beta(pred_list_here, gt_list, 2, 35))
+
+        save_json(
+            {
+                'f2_max': np.max(fbeta),
+                'f2_at_0.5': fbeta_2[4],
+                'rough_sweep': {i: j for i, j in zip(probs2, fbeta_2)},
+            }, join(validation_output_folder, 'scores.json')
+        )
+        save_json(
+            {
+                'precise_sweep': {i: j for i, j in zip(probs, fbeta)},
+            }, join(validation_output_folder, 'scores_precise.json')
+        )
 
     def on_epoch_end(self):
         ### ema logs val loss here, lower is better
@@ -410,12 +423,12 @@ class MotorRegressionTrainer(nnUNetTrainer):
             l = self.loss(output, target)
         # import IPython;IPython.embed()
         # if False:
-            # idx = 1
-            # from batchviewer import view_batch
-            # tmp = F.sigmoid(output[0][idx, 0])
-            # print(tmp.max())
-            # view_batch(data[idx, 0], target[0][idx, 0], tmp)
-            # quit()
+        # idx = 1
+        # from batchviewer import view_batch
+        # tmp = F.sigmoid(output[0][idx, 0])
+        # print(tmp.max())
+        # view_batch(data[idx, 0], target[0][idx, 0], tmp)
+        # quit()
 
         return {'loss': l.detach().cpu().numpy()}
 
