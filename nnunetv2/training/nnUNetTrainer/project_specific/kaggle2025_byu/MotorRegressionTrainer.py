@@ -1,17 +1,25 @@
+import multiprocessing
+from copy import deepcopy
+
+import SimpleITK
 from batchgenerators.dataloading.nondet_multi_threaded_augmenter import NonDetMultiThreadedAugmenter
 from batchgenerators.dataloading.single_threaded_augmenter import SingleThreadedAugmenter
+from nnInteractive.utils.erosion_dilation import iterative_3x3_same_padding_pool3d
 from torch import distributed as dist, autocast
-from time import time
+from time import time, sleep
 from typing import Union, Tuple, List
 
 import numpy as np
 import torch
-from batchgenerators.utilities.file_and_folder_operations import join
+from batchgenerators.utilities.file_and_folder_operations import join, maybe_mkdir_p, save_json
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
 from batchgeneratorsv2.transforms.utils.deep_supervision_downsampling import DownsampleSegForDSTransform
 from torch import nn
+
+from nnunetv2.configuration import default_num_processes
+from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 from nnunetv2.training.data_augmentation.kaggle_2025_byu import ConvertSegToRegrTarget
 from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.dataloading.nnunet_dataset import infer_dataset_class
@@ -21,19 +29,64 @@ from nnunetv2.training.loss.regression import RegDice_and_MSE_loss, RegDice1, No
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.collate_outputs import collate_outputs
 from nnunetv2.utilities.default_n_proc_DA import get_allowed_n_proc_DA
+from nnunetv2.utilities.file_path_utilities import check_workers_alive_and_busy
 from nnunetv2.utilities.helpers import dummy_context
 from torch.nn import functional as F
 
+
+class GaussianBlur3D:
+    def __init__(self, sigma: float, truncate: float = 4.0, device=None):
+        self.sigma = sigma
+        self.truncate = truncate
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.kernel_z, self.kernel_y, self.kernel_x = self._get_separable_gaussian_kernels_3d(sigma, truncate)
+        self.kernel_z = self.kernel_z.to(self.device)
+        self.kernel_y = self.kernel_y.to(self.device)
+        self.kernel_x = self.kernel_x.to(self.device)
+
+    @staticmethod
+    def _gaussian_1d_kernel(sigma: float, truncate: float) -> torch.Tensor:
+        radius = int(truncate * sigma + 0.5)
+        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
+        kernel = torch.exp(-0.5 * (x / sigma) ** 2)
+        kernel /= kernel.sum()
+        return kernel.view(1, 1, -1)  # Shape: [1, 1, k]
+
+    def _get_separable_gaussian_kernels_3d(self, sigma: float, truncate: float):
+        kernel_1d = self._gaussian_1d_kernel(sigma, truncate)  # [1, 1, k]
+        k = kernel_1d.shape[-1]
+
+        kernel_z = kernel_1d.view(1, 1, k, 1, 1)
+        kernel_y = kernel_1d.view(1, 1, 1, k, 1)
+        kernel_x = kernel_1d.view(1, 1, 1, 1, k)
+
+        return kernel_z, kernel_y, kernel_x
+
+    def apply(self, volume: torch.Tensor) -> torch.Tensor:
+        # Padding sizes
+        pad_z = self.kernel_z.shape[2] // 2
+        pad_y = self.kernel_y.shape[3] // 2
+        pad_x = self.kernel_x.shape[4] // 2
+
+        # Pad the input tensor: (W, H, D) order
+        volume = F.pad(volume, (pad_x, pad_x, pad_y, pad_y, pad_z, pad_z), mode='replicate')
+
+        # Apply depthwise separable convolutions
+        volume = F.conv3d(volume, self.kernel_z, groups=volume.shape[1], padding=0)
+        volume = F.conv3d(volume, self.kernel_y, groups=volume.shape[1], padding=0)
+        volume = F.conv3d(volume, self.kernel_x, groups=volume.shape[1], padding=0)
+
+        return volume
 
 class MotorRegressionTrainer(nnUNetTrainer):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
                  device: torch.device = torch.device('cuda')):
         super().__init__(plans, configuration, fold, dataset_json, device)
         self.save_every = 5
+        self.min_motor_distance: int = 15
 
-    @staticmethod
     def get_training_transforms(
-            patch_size: Union[np.ndarray, Tuple[int]],
+            self, patch_size: Union[np.ndarray, Tuple[int]],
             rotation_for_DA: RandomScalar,
             deep_supervision_scales: Union[List, Tuple, None],
             mirror_axes: Tuple[int, ...],
@@ -51,14 +104,13 @@ class MotorRegressionTrainer(nnUNetTrainer):
         transforms.transforms.pop(-1)
 
         transforms.transforms[0].mode_seg = 'nearest'
-        transforms.transforms.append(ConvertSegToRegrTarget('EDT', gaussian_sigma=5,
-                                                            edt_radius=15, min_segmentation_size=10))
+        transforms.transforms.append(ConvertSegToRegrTarget('EDT', gaussian_sigma=self.min_motor_distance // 3,
+                                                            edt_radius=self.min_motor_distance, min_segmentation_size=10))
         transforms.transforms.append(DownsampleSegForDSTransform(deep_supervision_scales))
 
         return transforms
 
-    @staticmethod
-    def get_validation_transforms(
+    def get_validation_transforms(self,
             deep_supervision_scales: Union[List, Tuple, None],
             is_cascaded: bool = False,
             foreground_labels: Union[Tuple[int, ...], List[int]] = None,
@@ -72,8 +124,8 @@ class MotorRegressionTrainer(nnUNetTrainer):
         transforms.transforms.pop(-1)
 
 
-        transforms.transforms.append(ConvertSegToRegrTarget('EDT', gaussian_sigma=5,
-                                                            edt_radius=9, min_segmentation_size=10))
+        transforms.transforms.append(ConvertSegToRegrTarget('EDT', gaussian_sigma=self.min_motor_distance // 3,
+                                                            edt_radius=self.min_motor_distance, min_segmentation_size=10))
         transforms.transforms.append(DownsampleSegForDSTransform(deep_supervision_scales))
 
         return transforms
@@ -192,8 +244,105 @@ class MotorRegressionTrainer(nnUNetTrainer):
         return net
 
     def perform_actual_validation(self, save_probabilities: bool = False):
-        # rewrite inference so that we get the predicted maps and a json with the coordinates. evaluate as the challenge does
-        pass
+        MIN_P = 0.1 # detection threshold. Designed to export a lot of motors, must be calibrated on 5 fold cv
+
+        self.set_deep_supervision_enabled(False)
+        self.network.eval()
+
+        if self.is_ddp and self.batch_size == 1 and self.enable_deep_supervision and self._do_i_compile():
+            self.print_to_log_file("WARNING! batch size is 1 during training and torch.compile is enabled. If you "
+                                   "encounter crashes in validation then this is because torch.compile forgets "
+                                   "to trigger a recompilation of the model with deep supervision disabled. "
+                                   "This causes torch.flip to complain about getting a tuple as input. Just rerun the "
+                                   "validation with --val (exactly the same as before) and then it will work. "
+                                   "Why? Because --val triggers nnU-Net to ONLY run validation meaning that the first "
+                                   "forward pass (where compile is triggered) already has deep supervision disabled. "
+                                   "This is exactly what we need in perform_actual_validation")
+
+        dsj = deepcopy(self.dataset_json)
+        dsj['labels'] = {'background': 0}
+        predictor = nnUNetPredictor(tile_step_size=0.5, use_gaussian=True, use_mirroring=True,
+                                    perform_everything_on_device=True, device=self.device, verbose=False,
+                                    verbose_preprocessing=False, allow_tqdm=False)
+        predictor.manual_initialization(self.network, self.plans_manager, self.configuration_manager, None,
+                                        dsj, self.__class__.__name__,
+                                        self.inference_allowed_mirroring_axes)
+
+        gb = GaussianBlur3D(2, 3, self.device)
+
+        with multiprocessing.get_context("spawn").Pool(default_num_processes) as export_pool:
+            worker_list = [i for i in export_pool._pool]
+            validation_output_folder = join(self.output_folder, 'validation')
+            maybe_mkdir_p(validation_output_folder)
+
+            # we cannot use self.get_tr_and_val_datasets() here because we might be DDP and then we have to distribute
+            # the validation keys across the workers.
+            _, val_keys = self.do_split()
+
+            dataset_val = self.dataset_class(self.preprocessed_dataset_folder, val_keys,
+                                             folder_with_segs_from_previous_stage=self.folder_with_segs_from_previous_stage)
+
+            next_stages = self.configuration_manager.next_stage_names
+
+            if next_stages is not None:
+                _ = [maybe_mkdir_p(join(self.output_folder_base, 'predicted_next_stage', n)) for n in next_stages]
+
+            results = []
+
+            for i, k in enumerate(dataset_val.identifiers):
+                proceed = not check_workers_alive_and_busy(export_pool, worker_list, results,
+                                                           allowed_num_queued=2)
+                while not proceed:
+                    sleep(0.1)
+                    proceed = not check_workers_alive_and_busy(export_pool, worker_list, results,
+                                                               allowed_num_queued=2)
+
+                self.print_to_log_file(f"predicting {k}")
+                data, _, seg_prev, properties = dataset_val.load_case(k)
+
+                # we do [:] to convert blosc2 to numpy
+                data = data[:]
+                data = torch.from_numpy(data)
+
+                if self.is_cascaded:
+                    raise NotImplementedError
+
+                self.print_to_log_file(f'{k}, shape {data.shape}, rank {self.local_rank}')
+                output_filename_truncated = join(validation_output_folder, k)
+
+                prediction = predictor.predict_sliding_window_return_logits(data)
+                prediction = F.sigmoid(prediction).float()[0]
+
+                # convert prediction to motor localizations
+                # smooth with Gaussian filter (sigma 2)
+                smooth_pred = gb.apply(prediction[None, None])[0, 0]
+
+                # extract local maxima along with their motor probabilities
+                # we hackily reduce the max pool range because the max pooling kernel will be a square, not a circle. This is super random but eh.
+                mp = iterative_3x3_same_padding_pool3d(smooth_pred[None, None], self.min_motor_distance - 2)[0, 0]
+                detections = (smooth_pred == mp) & (prediction > MIN_P)
+                detected_coords = torch.argwhere(detections)
+
+                det_p = [prediction[*i].item() for i in detected_coords]
+                detected_coords = [[i.item() for i in j] for j in detected_coords]
+
+                # save raw prediction, found motors with their probs, motor_map
+
+                # raw prediction
+                tmp = SimpleITK.GetImageFromArray(prediction.cpu().numpy())
+                tmp.SetSpacing(list(properties['spacing'])[::-1])
+                SimpleITK.WriteImage(tmp, output_filename_truncated + '.nii.gz')
+
+                # detection map
+                tmp = SimpleITK.GetImageFromArray(detections.cpu().numpy().astype(np.uint8))
+                tmp.SetSpacing(list(properties['spacing'])[::-1])
+                SimpleITK.WriteImage(tmp, output_filename_truncated + '_detections.nii.gz')
+
+                # coordinates and probabilities
+                save_json({'coordinates': detected_coords, 'probabilities': det_p}, output_filename_truncated + '.json')
+
+        # todo evaluation
+
 
     def on_epoch_end(self):
         ### ema logs val loss here, lower is better
@@ -379,4 +528,3 @@ class MotorRegressionTrainer_MSERegDice3(MotorRegressionTrainer):
             # now wrap the loss
             loss = DeepSupervisionWrapper(loss, weights)
         return loss
-
