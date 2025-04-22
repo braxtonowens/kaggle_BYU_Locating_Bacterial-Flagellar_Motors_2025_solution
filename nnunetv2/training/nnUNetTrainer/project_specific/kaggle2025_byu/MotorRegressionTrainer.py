@@ -1,26 +1,26 @@
 import multiprocessing
 from copy import deepcopy
+from time import time, sleep
+from typing import Union, Tuple, List
 
 import SimpleITK
+import numpy as np
+import torch
 from batchgenerators.dataloading.nondet_multi_threaded_augmenter import NonDetMultiThreadedAugmenter
 from batchgenerators.dataloading.single_threaded_augmenter import SingleThreadedAugmenter
+from batchgenerators.utilities.file_and_folder_operations import join, maybe_mkdir_p, save_json, load_json
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar
+from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
+from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
+from batchgeneratorsv2.transforms.utils.deep_supervision_downsampling import DownsampleSegForDSTransform
 from challenge2025_kaggle_byu_flagellarmotors.evaluation.compute_fbeta import compute_f_beta
 from challenge2025_kaggle_byu_flagellarmotors.instance_seg_to_regression_target.fabians_transform import \
     ConvertSegToRegrTarget
 from challenge2025_kaggle_byu_flagellarmotors.utils.gaussian_blur import GaussianBlur3D
 from nnInteractive.utils.erosion_dilation import iterative_3x3_same_padding_pool3d
 from torch import distributed as dist, autocast
-from time import time, sleep
-from typing import Union, Tuple, List
-
-import numpy as np
-import torch
-from batchgenerators.utilities.file_and_folder_operations import join, maybe_mkdir_p, save_json, load_json
-from batchgeneratorsv2.helpers.scalar_type import RandomScalar
-from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
-from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
-from batchgeneratorsv2.transforms.utils.deep_supervision_downsampling import DownsampleSegForDSTransform
 from torch import nn
+from torch.nn import functional as F
 
 from nnunetv2.configuration import default_num_processes
 from nnunetv2.dataset_conversion.kaggle_byu.official_data_to_nnunet import convert_coordinates
@@ -29,21 +29,19 @@ from nnunetv2.paths import nnUNet_raw
 from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.dataloading.nnunet_dataset import infer_dataset_class
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
-from nnunetv2.training.loss.regression import RegDice_and_MSE_loss, RegDice1, Nonlin_MSE_loss, Nonlin_RegDice_loss, \
-    RegDice3
+from nnunetv2.training.loss.regression import RegDice_and_MSE_loss, RegDice1, RegDice3
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.collate_outputs import collate_outputs
 from nnunetv2.utilities.default_n_proc_DA import get_allowed_n_proc_DA
 from nnunetv2.utilities.file_path_utilities import check_workers_alive_and_busy
 from nnunetv2.utilities.helpers import dummy_context
-from torch.nn import functional as F
 
 
 class MotorRegressionTrainer(nnUNetTrainer):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
                  device: torch.device = torch.device('cuda')):
         super().__init__(plans, configuration, fold, dataset_json, device)
-        self.save_every = 5
+        self.save_every = 50
         self.min_motor_distance: int = 15
 
     def get_training_transforms(
@@ -66,7 +64,7 @@ class MotorRegressionTrainer(nnUNetTrainer):
 
         transforms.transforms[0].mode_seg = 'nearest'
         transforms.transforms.append(ConvertSegToRegrTarget('EDT', gaussian_sigma=self.min_motor_distance // 3,
-                                                            edt_radius=self.min_motor_distance, min_segmentation_size=10))
+                                                            edt_radius=self.min_motor_distance))
         transforms.transforms.append(DownsampleSegForDSTransform(deep_supervision_scales))
 
         return transforms
@@ -86,7 +84,7 @@ class MotorRegressionTrainer(nnUNetTrainer):
 
 
         transforms.transforms.append(ConvertSegToRegrTarget('EDT', gaussian_sigma=self.min_motor_distance // 3,
-                                                            edt_radius=self.min_motor_distance, min_segmentation_size=10))
+                                                            edt_radius=self.min_motor_distance))
         transforms.transforms.append(DownsampleSegForDSTransform(deep_supervision_scales))
 
         return transforms
@@ -117,6 +115,39 @@ class MotorRegressionTrainer(nnUNetTrainer):
             # now wrap the loss
             loss = DeepSupervisionWrapper(loss, weights)
         return loss
+
+    def train_step(self, batch: dict) -> dict:
+        data = batch['data']
+        target = batch['target']
+
+        data = data.to(self.device, non_blocking=True)
+        if isinstance(target, list):
+            target = [i.to(self.device, non_blocking=True) for i in target]
+        else:
+            target = target.to(self.device, non_blocking=True)
+
+        self.optimizer.zero_grad(set_to_none=True)
+        # Autocast can be annoying
+        # If the device_type is 'cpu' then it's slow as heck and needs to be disabled.
+        # If the device_type is 'mps' then it will complain that mps is not implemented, even if enabled=False is set. Whyyyyyyy. (this is why we don't make use of enabled=False)
+        # So autocast will only be active if we have a cuda device.
+        with autocast(self.device.type, enabled=True) if self.device.type == 'cuda' else dummy_context():
+            output = self.network(data)
+
+         # take loss out of autocast! Sigmoid is not stable in fp16
+        l = self.loss([i.float() for i in output], target)
+
+        if self.grad_scaler is not None:
+            self.grad_scaler.scale(l).backward()
+            self.grad_scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
+            self.grad_scaler.step(self.optimizer)
+            self.grad_scaler.update()
+        else:
+            l.backward()
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
+            self.optimizer.step()
+        return {'loss': l.detach().cpu().numpy()}
 
     def get_dataloaders(self):
         if self.dataset_class is None:
@@ -204,6 +235,7 @@ class MotorRegressionTrainer(nnUNetTrainer):
                                                        num_output_channels, enable_deep_supervision)
         return net
 
+    @torch.inference_mode()
     def perform_actual_validation(self, save_probabilities: bool = False):
         MIN_P = 0.1 # detection threshold. Designed to export a lot of motors, must be calibrated on 5 fold cv
 
@@ -251,8 +283,7 @@ class MotorRegressionTrainer(nnUNetTrainer):
 
             results = []
 
-            import IPython;IPython.embed()
-            for i, k in enumerate(dataset_val.identifiers):
+            for i, k in enumerate(dataset_val.identifiers): # enumerate(['tomo_4c1ca8']): #
                 proceed = not check_workers_alive_and_busy(export_pool, worker_list, results,
                                                            allowed_num_queued=2)
                 while not proceed:
@@ -273,18 +304,24 @@ class MotorRegressionTrainer(nnUNetTrainer):
                 self.print_to_log_file(f'{k}, shape {data.shape}, rank {self.local_rank}')
                 output_filename_truncated = join(validation_output_folder, k)
 
+                # print('pred')
                 prediction = predictor.predict_sliding_window_return_logits(data)
+                # print('sigmoid')
                 prediction = F.sigmoid(prediction).float()[0]
 
                 # convert prediction to motor localizations
                 # smooth with Gaussian filter (sigma 2)
+                # print('smooth')
                 smooth_pred = gb.apply(prediction[None, None])[0, 0]
 
                 # extract local maxima along with their motor probabilities
                 # we hackily reduce the max pool range because the max pooling kernel will be a square, not a circle. This is super random but eh.
+                # print('maxpool')
                 mp = iterative_3x3_same_padding_pool3d(smooth_pred[None, None], self.min_motor_distance - 2)[0, 0]
+                # print('detect')
                 detections = (smooth_pred == mp) & (prediction > MIN_P)
                 detected_coords = torch.argwhere(detections)
+                # print('done')
 
                 det_p = [prediction[*i].item() for i in detected_coords]
                 detected_coords = [[i.item() for i in j] for j in detected_coords]
@@ -307,7 +344,6 @@ class MotorRegressionTrainer(nnUNetTrainer):
                 # coordinates and probabilities
                 save_json({'coordinates': detected_coords, 'coordinates_orig_shape': coords_in_orig_shape, 'probabilities': det_p}, output_filename_truncated + '.json')
 
-        # todo evaluation
         gt = load_json(join(nnUNet_raw, self.plans_manager.dataset_name, 'train_coordinates.json'))
         gt_list = [np.array(gt[k]) for k in val_keys]
         preds = [load_json(join(validation_output_folder, k + '.json')) for k in val_keys]
@@ -431,88 +467,6 @@ class MotorRegressionTrainer(nnUNetTrainer):
         # quit()
 
         return {'loss': l.detach().cpu().numpy()}
-
-class MotorRegressionTrainer_MSELoss(MotorRegressionTrainer):
-    def _build_loss(self):
-        loss = Nonlin_MSE_loss()
-        # loss = RegDice_and_MSE_loss(regdice=RegDice1())
-
-        # if self._do_i_compile():
-        #     loss.dc = torch.compile(loss.soft_dice)
-
-        # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
-        # this gives higher resolution outputs more weight in the loss
-
-        if self.enable_deep_supervision:
-            deep_supervision_scales = self._get_deep_supervision_scales()
-            weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
-            if self.is_ddp and not self._do_i_compile():
-                # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
-                # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
-                # Anywho, the simple fix is to set a very low weight to this.
-                weights[-1] = 1e-6
-            else:
-                weights[-1] = 0
-
-            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
-            weights = weights / weights.sum()
-            # now wrap the loss
-            loss = DeepSupervisionWrapper(loss, weights)
-        return loss
-
-class MotorRegressionTrainer_RegDice1(MotorRegressionTrainer):
-    def _build_loss(self):
-        loss = Nonlin_RegDice_loss(RegDice1(), F.sigmoid)
-
-        # if self._do_i_compile():
-        #     loss.dc = torch.compile(loss.soft_dice)
-
-        # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
-        # this gives higher resolution outputs more weight in the loss
-
-        if self.enable_deep_supervision:
-            deep_supervision_scales = self._get_deep_supervision_scales()
-            weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
-            if self.is_ddp and not self._do_i_compile():
-                # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
-                # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
-                # Anywho, the simple fix is to set a very low weight to this.
-                weights[-1] = 1e-6
-            else:
-                weights[-1] = 0
-
-            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
-            weights = weights / weights.sum()
-            # now wrap the loss
-            loss = DeepSupervisionWrapper(loss, weights)
-        return loss
-
-class MotorRegressionTrainer_RegDice3(MotorRegressionTrainer):
-    def _build_loss(self):
-        loss = Nonlin_RegDice_loss(RegDice3(), F.sigmoid)
-
-        # if self._do_i_compile():
-        #     loss.dc = torch.compile(loss.soft_dice)
-
-        # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
-        # this gives higher resolution outputs more weight in the loss
-
-        if self.enable_deep_supervision:
-            deep_supervision_scales = self._get_deep_supervision_scales()
-            weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
-            if self.is_ddp and not self._do_i_compile():
-                # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
-                # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
-                # Anywho, the simple fix is to set a very low weight to this.
-                weights[-1] = 1e-6
-            else:
-                weights[-1] = 0
-
-            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
-            weights = weights / weights.sum()
-            # now wrap the loss
-            loss = DeepSupervisionWrapper(loss, weights)
-        return loss
 
 
 class MotorRegressionTrainer_MSERegDice3(MotorRegressionTrainer):
