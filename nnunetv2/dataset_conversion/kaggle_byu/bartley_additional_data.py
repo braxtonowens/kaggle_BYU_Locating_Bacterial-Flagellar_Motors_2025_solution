@@ -114,7 +114,7 @@ if __name__ == "__main__":
     tomos     = loaded_labels[:, 3]
     datasets  = loaded_labels[:, 4]
     identifiers = np.unique([f"{d}__{t}" for d, t in zip(datasets, tomos)]).tolist()
-    identifiers.remove("10230__mba2011-07-18-1")          # still excluded
+    # identifiers.remove("10230__mba2011-07-18-1")          # still excluded
     print(f"Total unique identifiers: {len(identifiers)}")
 
     # ── restore checkpoints (if any) ─────────────────────────────── #
@@ -138,7 +138,7 @@ if __name__ == "__main__":
         print(f"{len(todo)} / {len(identifiers)} identifiers still missing – processing …")
 
         blosc2.set_nthreads(1)          # prevent CPU oversubscription inside workers
-        with ProcessPoolExecutor(max_workers=8) as ex:
+        with ProcessPoolExecutor(max_workers=4) as ex:
             futures = {ex.submit(process_identifier, iden, downloaded_data_dir, imagesTr, labelsTr): iden for iden in todo}
             for fut in as_completed(futures):
                 iden, coords, motor_ann, oshape = fut.result()
