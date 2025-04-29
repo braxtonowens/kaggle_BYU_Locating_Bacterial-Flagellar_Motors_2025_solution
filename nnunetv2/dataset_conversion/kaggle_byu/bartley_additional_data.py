@@ -1,10 +1,6 @@
-"""
-Restart-safe conversion of the BYU additional data
-(only Bartley-annotated cases).
-"""
-
 import os
 import json
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import SimpleITK as sitk
@@ -36,6 +32,7 @@ def process_image(
     new_shape = [round(i * zoom_factor) for i in image.shape]
     image = torch.from_numpy(image).to(device, non_blocking=True).float()
     image = interpolate(image[None, None], new_shape, mode="area")[0, 0]
+    empty_cache(device)
 
     mn = torch.kthvalue(image.view(-1), round(0.001 * image.numel()) + 1)[0]
     mx = torch.kthvalue(image.view(-1), round(0.999 * image.numel()) + 1)[0]
@@ -51,6 +48,7 @@ def process_image(
 
 def process_identifier(iden, downloaded_data_dir, imagesTr, labelsTr):
     """Heavy work executed in worker processes – returns all metadata."""
+    blosc2.set_nthreads(4)
     did, tomoid = iden.split("__")
 
     json_p = join(downloaded_data_dir, "data", did, f"{tomoid}.json")
@@ -98,8 +96,8 @@ def iden_complete(iden, imgs_dir, lbls_dir, nc, oc, os_):
 # ────────────────────────────── main ─────────────────────────────── #
 
 if __name__ == "__main__":
-    downloaded_data_dir = "/media/isensee/T9/raw_data/kaggle_byu_additional_data"
-    labels_csv          = "/media/isensee/T9/labels.csv"
+    downloaded_data_dir = "/home/isensee/temp/kaggle_byu_additional_data"
+    labels_csv          = "/home/isensee/temp/labels.csv"
 
     target_dataset_name = "Dataset181_Kaggle2025_BYU_FlagMot_BartleysData"
     out_dir             = "/home/isensee/temp"
@@ -132,26 +130,50 @@ if __name__ == "__main__":
         iden for iden in identifiers
         if not iden_complete(iden, imagesTr, labelsTr, new_coords, orig_coords, orig_shapes)
     ]
+    if '10230__mba2011-07-18-1' in todo:
+        todo.remove('10230__mba2011-07-18-1')
     if not todo:
         print("Nothing left to do – dataset already complete.")
     else:
         print(f"{len(todo)} / {len(identifiers)} identifiers still missing – processing …")
 
         blosc2.set_nthreads(1)          # prevent CPU oversubscription inside workers
-        with ProcessPoolExecutor(max_workers=4) as ex:
-            futures = {ex.submit(process_identifier, iden, downloaded_data_dir, imagesTr, labelsTr): iden for iden in todo}
-            for fut in as_completed(futures):
-                iden, coords, motor_ann, oshape = fut.result()
+        with ProcessPoolExecutor(max_workers=1) as ex:
+            futures = {
+                ex.submit(
+                    process_identifier, iden,
+                    downloaded_data_dir, imagesTr, labelsTr
+                ): iden for iden in todo
+            }
 
-                new_coords[iden]  = [[int(x) for x in c] for c in coords]
-                orig_coords[iden] = [[int(x) for x in c] for c in motor_ann]
-                orig_shapes[iden] = oshape
+            try:  # ← NEW outer guard
+                for fut in as_completed(futures):
+                    try:  # ← guard each individual result
+                        iden, coords, motor_ann, oshape = fut.result()
+                    except Exception as e:
+                        # 1. report which identifier crashed (if we have it)
+                        culprit = futures.get(fut, "<unknown>")
+                        print(f"\n❌  Worker failed on {culprit}: {e}", file=sys.stderr)
 
-                # checkpoints every finished case → safe resume
-                atomic_save(new_coords,  ck_new)
-                atomic_save(orig_coords, ck_orig)
-                atomic_save(orig_shapes, ck_shape)
-                print(f"✓ {iden}")
+                        # 2. stop the whole pool *now* and cancel everything pending
+                        ex.shutdown(cancel_futures=True)
+
+                        # 3. re-raise so the script exits with non-zero status
+                        raise
+
+                    # ---- normal success path --------------------------------
+                    new_coords[iden] = [[int(x) for x in c] for c in coords]
+                    orig_coords[iden] = [[int(x) for x in c] for c in motor_ann]
+                    orig_shapes[iden] = oshape
+
+                    atomic_save(new_coords, ck_new)
+                    atomic_save(orig_coords, ck_orig)
+                    atomic_save(orig_shapes, ck_shape)
+                    print(f"✓ {iden}")
+
+            except Exception:
+                # guarantee the ‘with’ block doesn’t swallow the failure
+                sys.exit(1)
 
     # ── final dataset.json ───────────────────────────────────────── #
     n_motors = [len(v) for v in orig_coords.values()]
@@ -169,3 +191,4 @@ if __name__ == "__main__":
         converted_by="Fabian Isensee",
     )
     print("All done ✔")
+
