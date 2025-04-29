@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 from nnunetv2.training.nnUNetTrainer.project_specific.kaggle2025_byu.MotorRegressionTrainer import \
     MotorRegressionTrainer
+from nnunetv2.training.nnUNetTrainer.project_specific.kaggle2025_byu.data_augmentation.more_DA import \
+    MotorRegressionTrainer_BCEtopK20Loss_moreDA
 from torch import nn
 
 
@@ -29,7 +31,7 @@ class FocalLoss(nn.Module):
         return loss.mean()
 
 
-class MotorRegressionTrainer_FocalLoss(MotorRegressionTrainer):
+class MotorRegressionTrainer_FocalLoss_moreDA(MotorRegressionTrainer_BCEtopK20Loss_moreDA):
     def _build_loss(self):
         loss = FocalLoss()
         # loss = RegDice_and_MSE_loss(regdice=RegDice1())
