@@ -10,7 +10,7 @@ screen -dm bash -c ". ~/load_env_kaggle2025_byu.sh && CUDA_VISIBLE_DEVICES=5 nnU
 
 # launched as jobs
 bsub -q gpu-debian -gpu num=1:j_exclusive=yes:gmem=33G ". ~/load_env_kaggle2025_byu.sh && CUDA_VISIBLE_DEVICES=0 nnUNetv2_train 182 3d_fullres all -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA "
-bsub -q gpu-debian -gpu num=1:j_exclusive=yes:gmem=33G ". ~/load_env_kaggle2025_byu.sh && CUDA_VISIBLE_DEVICES=0 nnUNetv2_train 182 3d_fullres 0 -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA "
+bsub -q gpu-debian -gpu num=1:j_exclusive=yes:gmem=33G ". ~/load_env_kaggle2025_byu.sh && CUDA_VISIBLE_DEVICES=0 nnUNetv2_train 182 3d_fullres 0 -tr MotorRegressionTrainer_FocalLoss "
 bsub -q gpu-debian -gpu num=1:j_exclusive=yes:gmem=33G ". ~/load_env_kaggle2025_byu.sh && CUDA_VISIBLE_DEVICES=0 nnUNetv2_train 182 3d_fullres 1 -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA "
 bsub -q gpu-debian -gpu num=1:j_exclusive=yes:gmem=33G ". ~/load_env_kaggle2025_byu.sh && CUDA_VISIBLE_DEVICES=0 nnUNetv2_train 182 3d_fullres 2 -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA "
 bsub -q gpu-debian -gpu num=1:j_exclusive=yes:gmem=33G ". ~/load_env_kaggle2025_byu.sh && CUDA_VISIBLE_DEVICES=0 nnUNetv2_train 182 3d_fullres 3 -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA "
