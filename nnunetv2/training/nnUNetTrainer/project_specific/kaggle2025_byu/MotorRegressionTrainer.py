@@ -1,4 +1,5 @@
 import multiprocessing
+import os
 from copy import deepcopy
 from time import time, sleep
 from typing import Union, Tuple, List
@@ -334,12 +335,14 @@ class MotorRegressionTrainer(nnUNetTrainer):
                 # raw prediction
                 tmp = SimpleITK.GetImageFromArray(prediction.cpu().numpy())
                 tmp.SetSpacing(list(properties['spacing'])[::-1])
-                SimpleITK.WriteImage(tmp, output_filename_truncated + '.nii.gz')
+                if os.environ.get('nnUNet_save_soft_preds'):
+                    SimpleITK.WriteImage(tmp, output_filename_truncated + '.nii.gz')
 
                 # detection map
                 tmp = SimpleITK.GetImageFromArray(detections.cpu().numpy().astype(np.uint8))
                 tmp.SetSpacing(list(properties['spacing'])[::-1])
-                SimpleITK.WriteImage(tmp, output_filename_truncated + '_detections.nii.gz')
+                if os.environ.get('nnUNet_save_hard_preds'):
+                    SimpleITK.WriteImage(tmp, output_filename_truncated + '_detections.nii.gz')
 
                 # coordinates and probabilities
                 save_json({'coordinates': detected_coords, 'coordinates_orig_shape': coords_in_orig_shape, 'probabilities': det_p}, output_filename_truncated + '.json')
