@@ -1,3 +1,4 @@
+import multiprocessing
 import os
 import json
 import sys
@@ -46,26 +47,31 @@ def process_image(
     return out
 
 
-def process_identifier(iden, downloaded_data_dir, imagesTr, labelsTr):
+def process_identifier(iden, downloaded_data_dir, imagesTr, labelsTr, edge_length: int = 512):
     """Heavy work executed in worker processes – returns all metadata."""
-    blosc2.set_nthreads(4)
-    did, tomoid = iden.split("__")
+    try:
+        blosc2.set_nthreads(4)
+        did, tomoid = iden.split("__")
 
-    json_p = join(downloaded_data_dir, "data", did, f"{tomoid}.json")
-    img_p  = join(downloaded_data_dir, "data", did, f"{tomoid}.b2nd")
-    labels = load_json(json_p)
-    image  = blosc2.open(urlpath=img_p, mode="r")
-    motor_annotations = labels["annotation"]
+        json_p = join(downloaded_data_dir, "data", did, f"{tomoid}.json")
+        img_p  = join(downloaded_data_dir, "data", did, f"{tomoid}.b2nd")
+        labels = load_json(json_p)
+        image  = blosc2.open(urlpath=img_p, mode="r")
+        motor_annotations = labels["annotation"]
 
-    orig_shape = image.shape
-    img_arr    = process_image(image[:], 512, torch.device("cuda:0"))
-    coords     = convert_coordinates(motor_annotations, orig_shape, img_arr.shape)
-    seg        = generate_segmentation(img_arr.shape, coords, 6)
+        orig_shape = image.shape
+        img_arr    = process_image(image[:], edge_length, torch.device("cuda:0"))
+        coords     = convert_coordinates(motor_annotations, orig_shape, img_arr.shape)
+        seg        = generate_segmentation(img_arr.shape, coords, max(1, round(6 * edge_length / 512)))
 
-    sitk.WriteImage(sitk.GetImageFromArray(img_arr), join(imagesTr, f"{iden}_0000.nii.gz"))
-    sitk.WriteImage(sitk.GetImageFromArray(seg),     join(labelsTr,  f"{iden}.nii.gz"))
+        sitk.WriteImage(sitk.GetImageFromArray(img_arr), join(imagesTr, f"{iden}_0000.nii.gz"))
+        sitk.WriteImage(sitk.GetImageFromArray(seg),     join(labelsTr,  f"{iden}.nii.gz"))
 
-    return iden, coords, motor_annotations, orig_shape
+        return iden, coords, motor_annotations, orig_shape
+    except Exception as e:
+        empty_cache(torch.device("cuda:0"))
+        print(e)
+        raise e
 
 
 # ───────────────────────────── helpers ────────────────────────────── #
@@ -96,10 +102,12 @@ def iden_complete(iden, imgs_dir, lbls_dir, nc, oc, os_):
 # ────────────────────────────── main ─────────────────────────────── #
 
 if __name__ == "__main__":
+    multiprocessing.set_start_method('spawn')
+
     downloaded_data_dir = "/home/isensee/temp/kaggle_byu_additional_data"
     labels_csv          = "/home/isensee/temp/labels.csv"
 
-    target_dataset_name = "Dataset181_Kaggle2025_BYU_FlagMot_BartleysData"
+    target_dataset_name = "Dataset183_Kaggle2025_BYU_FlagMot_BartleysData_384"
     out_dir             = "/home/isensee/temp"
 
     imagesTr = join(out_dir, target_dataset_name, "imagesTr")
@@ -137,31 +145,25 @@ if __name__ == "__main__":
     else:
         print(f"{len(todo)} / {len(identifiers)} identifiers still missing – processing …")
 
-        blosc2.set_nthreads(1)          # prevent CPU oversubscription inside workers
+        blosc2.set_nthreads(8)          # prevent CPU oversubscription inside workers
         with ProcessPoolExecutor(max_workers=1) as ex:
             futures = {
                 ex.submit(
                     process_identifier, iden,
-                    downloaded_data_dir, imagesTr, labelsTr
+                    downloaded_data_dir, imagesTr, labelsTr, 384
                 ): iden for iden in todo
             }
 
-            try:  # ← NEW outer guard
-                for fut in as_completed(futures):
-                    try:  # ← guard each individual result
-                        iden, coords, motor_ann, oshape = fut.result()
-                    except Exception as e:
-                        # 1. report which identifier crashed (if we have it)
-                        culprit = futures.get(fut, "<unknown>")
-                        print(f"\n❌  Worker failed on {culprit}: {e}", file=sys.stderr)
+            while len(futures) > 0:
+                done = {i:v for i, v in futures.items() if i.done()}
+                for d in done.keys():
+                    if d.exception():
+                        print(f"Iden {futures[d]} failed with exception:", d.exception())
+                        del futures[d]
+                        continue
+                    del futures[d]
+                    iden, coords, motor_ann, oshape = d.result()
 
-                        # 2. stop the whole pool *now* and cancel everything pending
-                        ex.shutdown(cancel_futures=True)
-
-                        # 3. re-raise so the script exits with non-zero status
-                        raise
-
-                    # ---- normal success path --------------------------------
                     new_coords[iden] = [[int(x) for x in c] for c in coords]
                     orig_coords[iden] = [[int(x) for x in c] for c in motor_ann]
                     orig_shapes[iden] = oshape
@@ -170,10 +172,6 @@ if __name__ == "__main__":
                     atomic_save(orig_coords, ck_orig)
                     atomic_save(orig_shapes, ck_shape)
                     print(f"✓ {iden}")
-
-            except Exception:
-                # guarantee the ‘with’ block doesn’t swallow the failure
-                sys.exit(1)
 
     # ── final dataset.json ───────────────────────────────────────── #
     n_motors = [len(v) for v in orig_coords.values()]

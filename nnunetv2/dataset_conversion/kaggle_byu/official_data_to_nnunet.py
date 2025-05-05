@@ -60,8 +60,8 @@ if __name__ == '__main__':
     """
 
     """
-    nnunet_dataset_id = 988
-    task_name = "Kaggle2025_BYU_FlagellarMotors"
+    nnunet_dataset_id = 184
+    task_name = "Kaggle2025_BYU_FlagellarMotors_384"
 
     foldername = "Dataset%03.0d_%s" % (nnunet_dataset_id, task_name)
 
@@ -85,7 +85,7 @@ if __name__ == '__main__':
         print(iden)
         image = load_jpgs(join(base, 'train', iden))
         orig_shape = image.shape
-        image = resize_image(image, 512, torch.device('cuda:0'))
+        image = resize_image(image, 384, torch.device('cuda:0'))
         coords_orig = get_coordinates_from_labels(iden, labels)
         coords_reshaped = convert_coordinates(coords_orig, orig_shape, image.shape)
         new_coords[iden] = coords_reshaped
