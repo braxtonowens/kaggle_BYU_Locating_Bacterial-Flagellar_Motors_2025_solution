@@ -19,6 +19,7 @@ from challenge2025_kaggle_byu_flagellarmotors.instance_seg_to_regression_target.
     ConvertSegToRegrTarget
 from challenge2025_kaggle_byu_flagellarmotors.utils.gaussian_blur import GaussianBlur3D
 from nnInteractive.utils.erosion_dilation import iterative_3x3_same_padding_pool3d
+from skimage.morphology import ball
 from torch import distributed as dist, autocast
 from torch import nn
 from torch.nn import functional as F
@@ -337,6 +338,11 @@ class MotorRegressionTrainer(nnUNetTrainer):
                     tmp = SimpleITK.GetImageFromArray(prediction.cpu().numpy())
                     tmp.SetSpacing(list(properties['spacing'])[::-1])
                     SimpleITK.WriteImage(tmp, output_filename_truncated + '.nii.gz')
+                    from skimage.morphology.gray import dilation
+                    prediction_dilated = dilation(prediction.cpu().numpy().astype(np.uint8), footprint=ball(6))
+                    tmp = SimpleITK.GetImageFromArray(prediction_dilated)
+                    tmp.SetSpacing(list(properties['spacing'])[::-1])
+                    SimpleITK.WriteImage(tmp, output_filename_truncated + '_dil.nii.gz')
 
                 # detection map
                 if os.environ.get('nnUNet_save_hard_preds'):

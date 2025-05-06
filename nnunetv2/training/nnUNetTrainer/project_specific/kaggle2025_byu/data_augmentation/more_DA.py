@@ -1,6 +1,7 @@
 from typing import Union, Tuple, List
 
 import numpy as np
+import torch
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 from batchgeneratorsv2.transforms.intensity.brightness import MultiplicativeBrightnessTransform, \
@@ -329,3 +330,13 @@ class MotorRegressionTrainer_BCEtopK20Loss_moreDA(MotorRegressionTrainer_BCEtopK
         transforms = ComposeTransforms(transforms)
 
         return transforms
+
+
+class MotorRegressionTrainer_BCEtopK20Loss_moreDA_MD11(MotorRegressionTrainer_BCEtopK20Loss_moreDA):
+    """
+    To be used with dataset 185 (384 edge length)
+    """
+    def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
+                 device: torch.device = torch.device('cuda')):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        self.min_motor_distance: int = 11 # round(15 / 512 * 384)
