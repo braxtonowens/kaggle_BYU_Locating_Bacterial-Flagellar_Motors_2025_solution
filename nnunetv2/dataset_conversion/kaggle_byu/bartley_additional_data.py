@@ -146,7 +146,7 @@ if __name__ == "__main__":
         print(f"{len(todo)} / {len(identifiers)} identifiers still missing – processing …")
 
         blosc2.set_nthreads(8)          # prevent CPU oversubscription inside workers
-        with ProcessPoolExecutor(max_workers=1) as ex:
+        with ProcessPoolExecutor(max_workers=6) as ex:
             futures = {
                 ex.submit(
                     process_identifier, iden,
