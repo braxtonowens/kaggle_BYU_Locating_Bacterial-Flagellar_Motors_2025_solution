@@ -1,3 +1,5 @@
+import gc
+
 import SimpleITK as sitk
 import matplotlib.image as mpimg
 import numpy as np
@@ -10,17 +12,24 @@ from torch.nn.functional import interpolate
 from nnunetv2.dataset_conversion.generate_dataset_json import generate_dataset_json
 from nnunetv2.paths import nnUNet_raw
 from nnunetv2.utilities.helpers import empty_cache
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 
 @torch.inference_mode()
 def resize_image(image: np.ndarray, edge_length: int = 512, device: torch.device = torch.device('cuda:0')) -> np.array:
     zoom_factor = edge_length / max(image.shape)
     new_shape = [round(i * zoom_factor) for i in image.shape]
-    image = torch.from_numpy(image).to(device).float()
-    image = interpolate(image[None, None], new_shape, mode='area')[0, 0]
-    image = torch.clip(torch.round(image), min=0, max=255).byte().cpu().numpy()
+
+    image_torch = torch.from_numpy(image).to(device).float()
+    image_torch = interpolate(image_torch[None, None], new_shape, mode='area')[0, 0]
+    image_out = torch.clip(torch.round(image_torch), min=0, max=255).byte().cpu().numpy()
+
+    # cleanup
+    del image_torch
+    gc.collect()
     empty_cache(device)
-    return image
+
+    return image_out
 
 
 def load_jpgs(folder: str):
@@ -74,27 +83,71 @@ if __name__ == '__main__':
     maybe_mkdir_p(imagests)
     maybe_mkdir_p(labelstr)
 
-    base = '/media/isensee/raw_data/bact_motors/byu-locating-bacterial-flagellar-motors-2025'
+    base = '/media/isensee/raw_data/bact_motors/official'
     labels = np.loadtxt(join(base, 'train_labels.csv'), delimiter=',', skiprows=1, dtype=str)
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    writer_executor = ProcessPoolExecutor(max_workers=8)
+
+    futures = []
+
+
+    def write_nifti(image, path):
+        sitk.WriteImage(sitk.GetImageFromArray(image), path)
+
+
+    def prefetch_image(identifier):
+        img = load_jpgs(join(base, 'train', identifier))
+        return identifier, img
+
+
     identifiers = subdirs(join(base, 'train'), join=False)
+    it = iter(identifiers)
+    iden = next(it)
+    future = executor.submit(prefetch_image, iden)
 
     new_coords = {}
     orig_coords = {}
     orig_shapes = {}
-    for iden in identifiers:
+
+    for next_iden in it:
+        iden, image = future.result()
+        future = executor.submit(prefetch_image, next_iden)
+
         print(iden)
-        image = load_jpgs(join(base, 'train', iden))
         orig_shape = image.shape
         image = resize_image(image, 384, torch.device('cuda:0'))
         coords_orig = get_coordinates_from_labels(iden, labels)
         coords_reshaped = convert_coordinates(coords_orig, orig_shape, image.shape)
+
         new_coords[iden] = coords_reshaped
         orig_coords[iden] = coords_orig
         orig_shapes[iden] = orig_shape
+
         seg = generate_segmentation(image.shape, coords_reshaped, 6)
 
-        sitk.WriteImage(sitk.GetImageFromArray(image), join(imagestr, iden + '_0000.nii.gz'))
-        sitk.WriteImage(sitk.GetImageFromArray(seg), join(labelstr, iden + '.nii.gz'))
+        futures.append(writer_executor.submit(write_nifti, image, join(imagestr, iden + '_0000.nii.gz')))
+        futures.append(writer_executor.submit(write_nifti, seg, join(labelstr, iden + '.nii.gz')))
+
+    # process the final one
+    iden, image = future.result()
+    print(iden)
+    orig_shape = image.shape
+    image = resize_image(image, 384, torch.device('cuda:0'))
+    coords_orig = get_coordinates_from_labels(iden, labels)
+    coords_reshaped = convert_coordinates(coords_orig, orig_shape, image.shape)
+
+    new_coords[iden] = coords_reshaped
+    orig_coords[iden] = coords_orig
+    orig_shapes[iden] = orig_shape
+
+    seg = generate_segmentation(image.shape, coords_reshaped, 6)
+    futures.append(writer_executor.submit(write_nifti, image, join(imagestr, iden + '_0000.nii.gz')))
+    futures.append(writer_executor.submit(write_nifti, seg, join(labelstr, iden + '.nii.gz')))
+
+    # Wait for all NIfTI writing to complete
+    for f in as_completed(futures):
+        f.result()  # to propagate any exceptions
 
     for k in identifiers:
         for i in range(len(new_coords[k])):

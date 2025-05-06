@@ -333,15 +333,15 @@ class MotorRegressionTrainer(nnUNetTrainer):
                 # save raw prediction, found motors with their probs, motor_map
 
                 # raw prediction
-                tmp = SimpleITK.GetImageFromArray(prediction.cpu().numpy())
-                tmp.SetSpacing(list(properties['spacing'])[::-1])
                 if os.environ.get('nnUNet_save_soft_preds'):
+                    tmp = SimpleITK.GetImageFromArray(prediction.cpu().numpy())
+                    tmp.SetSpacing(list(properties['spacing'])[::-1])
                     SimpleITK.WriteImage(tmp, output_filename_truncated + '.nii.gz')
 
                 # detection map
-                tmp = SimpleITK.GetImageFromArray(detections.cpu().numpy().astype(np.uint8))
-                tmp.SetSpacing(list(properties['spacing'])[::-1])
                 if os.environ.get('nnUNet_save_hard_preds'):
+                    tmp = SimpleITK.GetImageFromArray(detections.cpu().numpy().astype(np.uint8))
+                    tmp.SetSpacing(list(properties['spacing'])[::-1])
                     SimpleITK.WriteImage(tmp, output_filename_truncated + '_detections.nii.gz')
 
                 # coordinates and probabilities
