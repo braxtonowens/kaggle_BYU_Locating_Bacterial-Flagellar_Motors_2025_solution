@@ -338,17 +338,17 @@ class MotorRegressionTrainer(nnUNetTrainer):
                     tmp = SimpleITK.GetImageFromArray(prediction.cpu().numpy())
                     tmp.SetSpacing(list(properties['spacing'])[::-1])
                     SimpleITK.WriteImage(tmp, output_filename_truncated + '.nii.gz')
-                    from skimage.morphology.gray import dilation
-                    prediction_dilated = dilation(prediction.cpu().numpy().astype(np.uint8), footprint=ball(6))
-                    tmp = SimpleITK.GetImageFromArray(prediction_dilated)
-                    tmp.SetSpacing(list(properties['spacing'])[::-1])
-                    SimpleITK.WriteImage(tmp, output_filename_truncated + '_dil.nii.gz')
 
                 # detection map
                 if os.environ.get('nnUNet_save_hard_preds'):
                     tmp = SimpleITK.GetImageFromArray(detections.cpu().numpy().astype(np.uint8))
                     tmp.SetSpacing(list(properties['spacing'])[::-1])
                     SimpleITK.WriteImage(tmp, output_filename_truncated + '_detections.nii.gz')
+                    from skimage.morphology.gray import dilation
+                    prediction_dilated = dilation(detections.cpu().numpy().astype(np.uint8), footprint=ball(6))
+                    tmp = SimpleITK.GetImageFromArray(prediction_dilated)
+                    tmp.SetSpacing(list(properties['spacing'])[::-1])
+                    SimpleITK.WriteImage(tmp, output_filename_truncated + '_dil.nii.gz')
 
                 # coordinates and probabilities
                 save_json({'coordinates': detected_coords, 'coordinates_orig_shape': coords_in_orig_shape, 'probabilities': det_p}, output_filename_truncated + '.json')
