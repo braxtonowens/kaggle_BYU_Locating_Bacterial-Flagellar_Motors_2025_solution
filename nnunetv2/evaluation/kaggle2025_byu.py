@@ -5,7 +5,7 @@ from challenge2025_kaggle_byu_flagellarmotors.evaluation.compute_fbeta import co
 
 def evaluate_folder(folder, gt_file, MIN_P=0.1):
     gt = load_json(gt_file)
-    pred_files = subfiles(folder, join=False, suffix='.json')
+    pred_files = [i for i in subfiles(folder, join=False, suffix='.json') if not i.startswith('scores')]
     pred_keys = [i[:-5] for i in pred_files]
     gt_list = [np.array(gt[k]) for k in pred_keys]
     preds = [load_json(join(folder, k)) for k in pred_files]
@@ -47,6 +47,7 @@ def evaluate_folder(folder, gt_file, MIN_P=0.1):
     save_json(
         {
             'f2_max': np.max(fbeta),
+            'f2_max_at_threshold': probs[fbeta == np.max(fbeta)][0],
             'f2_at_0.5': fbeta_2[4],
             'rough_sweep': {i: j for i, j in zip(probs2, fbeta_2)},
         }, join(folder, 'scores.json')
