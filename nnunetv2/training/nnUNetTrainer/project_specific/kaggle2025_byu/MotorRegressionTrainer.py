@@ -344,11 +344,14 @@ class MotorRegressionTrainer(nnUNetTrainer):
                     tmp = SimpleITK.GetImageFromArray(detections.cpu().numpy().astype(np.uint8))
                     tmp.SetSpacing(list(properties['spacing'])[::-1])
                     SimpleITK.WriteImage(tmp, output_filename_truncated + '_detections.nii.gz')
-                    from skimage.morphology.gray import dilation
-                    prediction_dilated = dilation(detections.cpu().numpy().astype(np.uint8), footprint=ball(6))
-                    tmp = SimpleITK.GetImageFromArray(prediction_dilated)
-                    tmp.SetSpacing(list(properties['spacing'])[::-1])
-                    SimpleITK.WriteImage(tmp, output_filename_truncated + '_dil.nii.gz')
+                    # from skimage.morphology.gray import dilation
+                    # prediction_exp = torch.clone(prediction)
+                    # prediction_exp[~detections] = 0
+                    # prediction_dilated = dilation(prediction_exp.cpu().numpy(), footprint=ball(4))
+                    # tmp = SimpleITK.GetImageFromArray(prediction_dilated)
+                    # tmp.SetSpacing(list(properties['spacing'])[::-1])
+                    # SimpleITK.WriteImage(tmp, output_filename_truncated + '_dil.nii.gz')
+                    # del prediction_exp
 
                 # coordinates and probabilities
                 save_json({'coordinates': detected_coords, 'coordinates_orig_shape': coords_in_orig_shape, 'probabilities': det_p}, output_filename_truncated + '.json')
