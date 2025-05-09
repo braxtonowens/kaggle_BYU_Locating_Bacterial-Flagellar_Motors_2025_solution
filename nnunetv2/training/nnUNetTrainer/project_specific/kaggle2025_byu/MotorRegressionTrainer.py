@@ -334,24 +334,26 @@ class MotorRegressionTrainer(nnUNetTrainer):
                 # save raw prediction, found motors with their probs, motor_map
 
                 # raw prediction
-                if os.environ.get('nnUNet_save_soft_preds'):
-                    tmp = SimpleITK.GetImageFromArray(prediction.cpu().numpy())
-                    tmp.SetSpacing(list(properties['spacing'])[::-1])
-                    SimpleITK.WriteImage(tmp, output_filename_truncated + '.nii.gz')
+                # if os.environ.get('nnUNet_save_soft_preds'):
+                tmp = (torch.round(prediction * 100) / 100).cpu().numpy()
+                tmp = SimpleITK.GetImageFromArray(tmp)
+                tmp.SetSpacing(list(properties['spacing'])[::-1])
+                SimpleITK.WriteImage(tmp, output_filename_truncated + '.nii.gz')
+                del tmp
 
                 # detection map
-                if os.environ.get('nnUNet_save_hard_preds'):
-                    tmp = SimpleITK.GetImageFromArray(detections.cpu().numpy().astype(np.uint8))
-                    tmp.SetSpacing(list(properties['spacing'])[::-1])
-                    SimpleITK.WriteImage(tmp, output_filename_truncated + '_detections.nii.gz')
-                    # from skimage.morphology.gray import dilation
-                    # prediction_exp = torch.clone(prediction)
-                    # prediction_exp[~detections] = 0
-                    # prediction_dilated = dilation(prediction_exp.cpu().numpy(), footprint=ball(4))
-                    # tmp = SimpleITK.GetImageFromArray(prediction_dilated)
-                    # tmp.SetSpacing(list(properties['spacing'])[::-1])
-                    # SimpleITK.WriteImage(tmp, output_filename_truncated + '_dil.nii.gz')
-                    # del prediction_exp
+                # if os.environ.get('nnUNet_save_hard_preds'):
+                #     tmp = SimpleITK.GetImageFromArray(detections.cpu().numpy().astype(np.uint8))
+                #     tmp.SetSpacing(list(properties['spacing'])[::-1])
+                #     SimpleITK.WriteImage(tmp, output_filename_truncated + '_detections.nii.gz')
+                #     from skimage.morphology.gray import dilation
+                #     prediction_exp = torch.clone(prediction)
+                #     prediction_exp[~detections] = 0
+                #     prediction_dilated = dilation(prediction_exp.cpu().numpy(), footprint=ball(4))
+                #     tmp = SimpleITK.GetImageFromArray(prediction_dilated)
+                #     tmp.SetSpacing(list(properties['spacing'])[::-1])
+                #     SimpleITK.WriteImage(tmp, output_filename_truncated + '_dil.nii.gz')
+                #     del prediction_exp
 
                 # coordinates and probabilities
                 save_json({'coordinates': detected_coords, 'coordinates_orig_shape': coords_in_orig_shape, 'probabilities': det_p}, output_filename_truncated + '.json')
