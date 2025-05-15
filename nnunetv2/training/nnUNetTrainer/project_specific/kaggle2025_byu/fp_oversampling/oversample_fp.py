@@ -74,3 +74,10 @@ class MotorRegressionTrainer_BCEtopK20Loss_moreDA_FPoversampling(MotorRegression
                                      CustomRemoveLabelTansform(list(range(20, 30)), set_to=0))
         print(transforms)
         return transforms
+
+
+class MotorRegressionTrainer_BCEtopK20Loss_moreDA_FPoversampling_3kep(MotorRegressionTrainer_BCEtopK20Loss_moreDA_FPoversampling):
+    def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
+             device: torch.device = torch.device('cuda')):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        self.num_epochs = 3000
