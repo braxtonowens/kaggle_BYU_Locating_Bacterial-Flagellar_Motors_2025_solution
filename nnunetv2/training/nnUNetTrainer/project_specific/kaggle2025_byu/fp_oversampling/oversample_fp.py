@@ -35,7 +35,11 @@ class CustomRemoveLabelTansform(SegOnlyTransform):
         else:
             channels = self.segmentation_channels
         for s in channels:
-            segmentation[s][torch.isin(segmentation[s], self.label_values)] = self.set_to
+            mask = torch.isin(segmentation[s], self.label_values)
+            if torch.any(mask):
+                deleted = torch.unique(segmentation[s][mask])
+                print('deleted', deleted)
+            segmentation[s][mask] = self.set_to
         return segmentation
 
 
