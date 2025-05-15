@@ -1,23 +1,13 @@
 from typing import Union, Tuple, List
 
 import numpy as np
-from batchgenerators.dataloading.nondet_multi_threaded_augmenter import NonDetMultiThreadedAugmenter
-from batchgenerators.dataloading.single_threaded_augmenter import SingleThreadedAugmenter
+import torch
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
+from batchgeneratorsv2.transforms.base.basic_transform import SegOnlyTransform
 from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
-from batchgeneratorsv2.transforms.utils.remove_label import RemoveLabelTansform
-from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.nnUNetTrainer.project_specific.kaggle2025_byu.data_augmentation.more_DA import \
     MotorRegressionTrainer_BCEtopK20Loss_moreDA
-
-
-from typing import Union, Tuple, List
-
-import torch
-
-from batchgeneratorsv2.transforms.base.basic_transform import SegOnlyTransform
-from nnunetv2.utilities.default_n_proc_DA import get_allowed_n_proc_DA
 
 
 class CustomRemoveLabelTansform(SegOnlyTransform):
@@ -35,11 +25,12 @@ class CustomRemoveLabelTansform(SegOnlyTransform):
         else:
             channels = self.segmentation_channels
         for s in channels:
-            mask = torch.isin(segmentation[s], self.label_values)
-            if torch.any(mask):
-                deleted = torch.unique(segmentation[s][mask])
-                print('deleted', deleted)
-            segmentation[s][mask] = self.set_to
+            # mask =
+            # if torch.any(mask):
+            #     deleted = torch.unique(segmentation[s][mask])
+            #     print('deleted', deleted)
+            segmentation[s][torch.isin(segmentation[s], self.label_values)] = self.set_to
+            # del mask
         return segmentation
 
 
