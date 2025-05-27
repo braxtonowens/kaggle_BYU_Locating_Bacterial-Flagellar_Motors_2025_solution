@@ -127,6 +127,12 @@ class MotorRegressionTrainer_BCEtopK20Loss_moreDA_3_5kep_EDT25(MotorRegressionTr
         self.num_epochs = 3500
         self.min_motor_distance = 25
 
+class MotorRegressionTrainer_BCEtopK20Loss_moreDA_EDT25(MotorRegressionTrainer_BCEtopK20Loss_moreDA):
+    def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
+                 device: torch.device = torch.device('cuda')):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        self.min_motor_distance = 25
+
 class MotorRegressionTrainer_BCEtopK20Loss_moreDA_3_5kep(MotorRegressionTrainer_BCEtopK20Loss_moreDA):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
                  device: torch.device = torch.device('cuda')):
