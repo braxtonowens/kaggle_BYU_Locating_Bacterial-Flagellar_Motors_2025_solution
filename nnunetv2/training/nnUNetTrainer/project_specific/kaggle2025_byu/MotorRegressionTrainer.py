@@ -135,6 +135,10 @@ class MotorRegressionTrainer(nnUNetTrainer):
         # So autocast will only be active if we have a cuda device.
         with autocast(self.device.type, enabled=True) if self.device.type == 'cuda' else dummy_context():
             output = self.network(data)
+            # import IPython;IPython.embed()
+            # if False:
+            #     from batchviewer import view_batch
+            #     view_batch(data[0], target[0][0], F.sigmoid(output[0][0]))
 
          # take loss out of autocast! Sigmoid is not stable in fp16
         l = self.loss([i.float() for i in output], target)
