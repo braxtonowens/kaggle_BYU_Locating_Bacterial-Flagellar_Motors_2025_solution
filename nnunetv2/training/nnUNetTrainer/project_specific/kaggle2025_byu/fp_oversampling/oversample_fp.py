@@ -153,6 +153,7 @@ class MotorRegressionTrainer_BCEtopK20Loss_moreDA_FPoversampling_warmup50_train2
         self.num_epochs = 2000
         self.warmup_duration_whole_net = 50  # lin increase whole network
         self.initial_lr = 1e-3
+        self.training_stage = None  # 'warmup_all', 'train'
 
     def configure_optimizers(self, stage: str = "warmup_all"):
         assert stage in ["warmup_all", "train"]
