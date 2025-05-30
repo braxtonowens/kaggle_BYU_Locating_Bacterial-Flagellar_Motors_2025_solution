@@ -146,12 +146,12 @@ class MotorRegressionTrainer_BCEtopK20Loss_moreDA_3_5kep(MotorRegressionTrainer_
         self.num_epochs = 3500
 
 
-class MotorRegressionTrainer_BCEtopK20Loss_moreDA_FPoversampling_warmup50_train2000_initlr1en3(MotorRegressionTrainer_BCEtopK20Loss_moreDA_FPoversampling):
+class MotorRegressionTrainer_BCEtopK20Loss_moreDA_FPoversampling_warmup30_train1500_initlr1en3(MotorRegressionTrainer_BCEtopK20Loss_moreDA_FPoversampling):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
                  device: torch.device = torch.device('cuda')):
         super().__init__(plans, configuration, fold, dataset_json, device)
-        self.num_epochs = 2000
-        self.warmup_duration_whole_net = 50  # lin increase whole network
+        self.num_epochs = 1500
+        self.warmup_duration_whole_net = 30  # lin increase whole network
         self.initial_lr = 1e-3
         self.training_stage = None  # 'warmup_all', 'train'
 
