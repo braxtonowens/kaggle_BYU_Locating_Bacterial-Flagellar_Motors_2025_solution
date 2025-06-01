@@ -358,3 +358,10 @@ class MotorRegressionTrainer_BCEtopK20Loss_moreDA_warmup50_train2000_initlr1en3(
         if self.grad_scaler is not None:
             if checkpoint["grad_scaler_state"] is not None:
                 self.grad_scaler.load_state_dict(checkpoint["grad_scaler_state"])
+
+
+class MotorRegressionTrainer_BCEtopK20Loss_moreDA_1en1(MotorRegressionTrainer_BCEtopK20Loss_moreDA):
+    def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
+                 device: torch.device = torch.device('cuda')):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        self.initial_lr = 1e-1
