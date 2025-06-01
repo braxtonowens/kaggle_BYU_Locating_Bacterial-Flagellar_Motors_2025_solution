@@ -365,3 +365,9 @@ class MotorRegressionTrainer_BCEtopK20Loss_moreDA_1en1(MotorRegressionTrainer_BC
                  device: torch.device = torch.device('cuda')):
         super().__init__(plans, configuration, fold, dataset_json, device)
         self.initial_lr = 1e-1
+
+class MotorRegressionTrainer_BCEtopK20Loss_moreDA_1en3(MotorRegressionTrainer_BCEtopK20Loss_moreDA):
+    def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
+                 device: torch.device = torch.device('cuda')):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        self.initial_lr = 1e-3
