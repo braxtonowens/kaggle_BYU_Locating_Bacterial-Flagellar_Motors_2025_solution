@@ -94,10 +94,5 @@ IMPORTANT: Trainings in nnU-Net are not seeded, so you are unlikely to get exact
 ### Training with less compute
 If you want to train a smaller model we recommend:
 
-<<<<<<< HEAD
-`nnUNet_n_proc_DA=24 nnUNetv2_train 189 3d_fullres all -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA -num_gpus 1 -p nnUNetResEncUNetMPlans`\
-This should run ~18h on a single A100 and yield around 0.86392 private lb score with threshold 0.25
-=======
 ```nnUNet_n_proc_DA=24 nnUNetv2_train 189 3d_fullres all -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA -num_gpus 1 -p nnUNetResEncUNetMPlans```\
 This should run ~18h on a single A100 and yield around 0.86392 private lb score with threshold 0.25
->>>>>>> nnunet/challenge/kaggle2025_BYU
