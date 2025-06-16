@@ -96,3 +96,14 @@ If you want to train a smaller model we recommend:
 
 ```nnUNet_n_proc_DA=24 nnUNetv2_train 189 3d_fullres all -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA -num_gpus 1 -p nnUNetResEncUNetMPlans```\
 This should run ~18h on a single A100 and yield around 0.86392 private lb score with threshold 0.25
+
+# Reproduce prepared dataset
+If you want to reproduce all the steps to arrive at the dataset we shared, this is roughly how
+
+- Download official and [Bartleys](https://www.kaggle.com/datasets/brendanartley/cryoet-flagellar-motors-dataset) data
+- Run [dataset conversion script for official data](nnunetv2/dataset_conversion/kaggle_byu/official_data_to_nnunet.py)
+- Redownload all the data from bartley using [the modified Czii Downloader](nnunetv2/dataset_conversion/kaggle_byu/bartleys_data/additional_data_download.py). Make sure to download for all three authors by uncommenting one after the other at the bottom of the script. Be prepared to wait >3days and to restart occasionally.
+- Run [this script](nnunetv2/dataset_conversion/kaggle_byu/bartleys_data/bartley_additional_data.py) to convert the Bartley data to nnunet format
+- The 555 additional cases were create with the code located [here](nnunetv2/dataset_conversion/kaggle_byu/additional_external_data). There is a separate readme in this folder
+
+Check out the [napari data inspection tool](https://github.com/MIC-DKFZ/napari-data-inspection). We used it for manual corrections.
