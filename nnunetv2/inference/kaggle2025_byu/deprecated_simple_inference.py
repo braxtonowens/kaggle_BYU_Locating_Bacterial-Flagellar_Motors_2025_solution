@@ -2,7 +2,6 @@ from concurrent.futures import ThreadPoolExecutor
 import torch
 import numpy as np
 from batchgenerators.utilities.file_and_folder_operations import subfiles, subdirs, join
-from challenge2025_kaggle_byu_flagellarmotors.utils.gaussian_blur import GaussianBlur3D
 from nnInteractive.utils.erosion_dilation import iterative_3x3_same_padding_pool3d
 from torch.nn.functional import interpolate
 from torch.nn import functional as F
