@@ -100,10 +100,11 @@ This should run ~18h on a single A100 and yield around 0.86392 private lb score 
 # Reproduce prepared dataset
 If you want to reproduce all the steps to arrive at the dataset we shared, this is roughly how
 
-- Download official and [Bartleys](https://www.kaggle.com/datasets/brendanartley/cryoet-flagellar-motors-dataset) data
+- Download [official](https://www.kaggle.com/competitions/byu-locating-bacterial-flagellar-motors-2025/data) and [Bartleys](https://www.kaggle.com/datasets/brendanartley/cryoet-flagellar-motors-dataset) data
 - Run [dataset conversion script for official data](nnunetv2/dataset_conversion/kaggle_byu/official_data_to_nnunet.py)
 - Redownload all the data from bartley using [the modified Czii Downloader](nnunetv2/dataset_conversion/kaggle_byu/bartleys_data/additional_data_download.py). Make sure to download for all three authors by uncommenting one after the other at the bottom of the script. Be prepared to wait >3days and to restart occasionally.
 - Run [this script](nnunetv2/dataset_conversion/kaggle_byu/bartleys_data/bartley_additional_data.py) to convert the Bartley data to nnunet format
 - The 555 additional cases were create with the code located [here](nnunetv2/dataset_conversion/kaggle_byu/additional_external_data). There is a separate readme in this folder
+- You can merge datasets with [this script](nnunetv2/dataset_conversion/kaggle_byu/merge_datasets.py). 189 is the result of merging 186 with 188. 186 is a corrected version (new labels) of 182 (not provided) which itself was a merger of 142 (official data) and 181 (Bartleys data). Merging datasets just links images and labels. It does not create copies. 
 
 Check out the [napari data inspection tool](https://github.com/MIC-DKFZ/napari-data-inspection). We used it for manual corrections.
