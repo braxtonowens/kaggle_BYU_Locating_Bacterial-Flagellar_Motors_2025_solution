@@ -7,6 +7,7 @@ from torch.nn.functional import interpolate
 from torch.nn import functional as F
 
 from nnunetv2.dataset_conversion.kaggle_byu.official_data_to_nnunet import convert_coordinates, load_jpgs
+from nnunetv2.inference.kaggle2025_byu.gaussian_blur_3d import GaussianBlur3D
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 from nnunetv2.utilities.helpers import empty_cache
 

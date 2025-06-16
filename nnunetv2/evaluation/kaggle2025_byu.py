@@ -1,6 +1,70 @@
 from batchgenerators.utilities.file_and_folder_operations import *
 import numpy as np
-from challenge2025_kaggle_byu_flagellarmotors.evaluation.compute_fbeta import compute_f_beta
+from typing import List
+import numpy as np
+
+
+def compute_f_beta(
+    predicted_coordinates: List[np.ndarray],
+    gt_coordinates: List[np.ndarray],
+    beta: int = 2,
+    pixel_dist_threshold: float = 35.0,
+) -> float:
+    """
+    Computes the F-beta score between predicted and ground truth 3D coordinates.
+
+    This function is designed for evaluating object localization in 3D microscopy images.
+    It compares predicted coordinates against ground truth annotations using a distance threshold
+    to determine true positives, false positives, and false negatives.
+
+    Each predicted point is considered a true positive (TP) if it is within `pixel_dist_threshold`
+    of any ground truth point. Multiple predictions may match a single ground truth point
+    without penalty. This is intentional and appropriate when images are expected to contain
+    a single object in test time. Predictions that do not match any ground truth are counted
+    as false positives (FP), and ground truth points with no matching prediction are counted
+    as false negatives (FN).
+
+    Args:
+        predicted_coordinates (List[np.ndarray]): A list of arrays (one per image), each of shape (N, 3),
+            containing the predicted 3D coordinates. Use an empty array if there are no predictions for an image.
+        gt_coordinates (List[np.ndarray]): A list of arrays (one per image), each of shape (M, 3),
+            containing the ground truth 3D coordinates. Use an empty array if there are no GTs for an image.
+        beta (int, optional): Weight of recall in the harmonic mean. Default is 2 (F2 score).
+        pixel_dist_threshold (float, optional): Maximum distance (in pixels) to consider a prediction
+            as matching a ground truth point. Default is 35, which corresponds roughly to 1000 Å on Dataset142.
+
+    Returns:
+        float: The computed F-beta score across all images.
+
+    Notes:
+        - This metric assumes independent evaluation per image.
+        - Multiple predictions matching the same GT are not penalized.
+        - FP is incremented for unmatched predictions.
+        - FN is incremented for unmatched GT points.
+    """
+    assert len(predicted_coordinates) == len(gt_coordinates)
+    TP = 0
+    FP = 0
+    FN = 0
+
+    for preds, gts in zip(predicted_coordinates, gt_coordinates):
+        if len(gts) == 0:
+            FP += len(preds)
+            continue
+        if len(preds) == 0:
+            FN += len(gts)
+            continue
+
+        distances = np.linalg.norm(preds[:, np.newaxis, :] - gts[np.newaxis, :, :], axis=2)
+        thresholded = distances < pixel_dist_threshold
+        TP += np.sum(np.any(thresholded, 0))
+        FN += np.sum(~np.any(thresholded, 0))
+        FP += np.sum(~np.any(thresholded, 1))
+
+    denom = (1 + beta ** 2) * TP + beta ** 2 * FN + FP
+    if denom == 0:
+        return 0.0
+    return (1 + beta ** 2) * TP / denom
 
 
 def evaluate_folder(folder, gt_file, MIN_P=0.1):
