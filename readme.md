@@ -65,22 +65,22 @@ RECOMMENDED: Add these lines to your `.bashrc` file (or whatever you are using) 
 ## nnUNet experiment planning and preprocessing
 Run the following commands (anywhere on your system)
 
-`nnUNetv2_extract_fingerprint -d 189 -np 64`\
+```nnUNetv2_extract_fingerprint -d 189 -np 64```\
 This will extract a 'dataset fingerprint' that nnU-Net uses for autoconfig. Set -np to a reasonable number of processes. Default here is 64. More is better but eats more RAM and I/O
 
-`nnUNetv2_plan_experiment -d 189 -pl nnUNetPlannerResEncM`\
+```nnUNetv2_plan_experiment -d 189 -pl nnUNetPlannerResEncM```\
 This will generate an automatically configured nnU-Net pipeline to use for your dataset. Usually we would just use it but for the competition we made some manual changes (larger batch and patch size and necessary adjustments to network topology).
 
 Copy our manually adjusted nnU-Net plans from [nnunetv2/dataset_conversion/kaggle_byu/plans/nnUNetResEncUNetMPlans.json](nnunetv2/dataset_conversion/kaggle_byu/plans/nnUNetResEncUNetMPlans.json) to `$nnUNet_preprocessed/Dataset189_Kaggle2025_BYU_FlagellarMotors_mergedExternalBartleyNonBartley_512`. This should overwrite a file with the same name.
 
-Now you can perform preprocessing:
-`nnUNetv2_preprocess -d 189 -np 64 -c 3d_fullres_bs16_ps128_256_256 -p nnUNetResEncUNetMPlans`\
+Now you can perform preprocessing:\
+```nnUNetv2_preprocess -d 189 -np 64 -c 3d_fullres_bs16_ps128_256_256 -p nnUNetResEncUNetMPlans```\
 Again steer the number of processes used with `-np`. Sit back and grab a cup of coffee, this may take a while
 
 ## Training
 Training our final model requires 8 GPUs with at least 40GB VRAM each. Maybe 32GB will work as well - no guarantee though!
 
-`nnUNet_n_proc_DA=24 nnUNetv2_train 189 3d_fullres_bs16_ps128_256_256 all -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA_3_5kep_EDT25 -num_gpus 8 -p nnUNetResEncUNetMPlans`\
+```nnUNet_n_proc_DA=24 nnUNetv2_train 189 3d_fullres_bs16_ps128_256_256 all -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA_3_5kep_EDT25 -num_gpus 8 -p nnUNetResEncUNetMPlans```\
 Note that nnUNet_n_proc_DA=24 steers the number of data augmentation workers per GPU. Adjust to your system.\
 We ran our training on a node with 128C/256T. >500GB RAM needed. We had 1TB.
 
@@ -94,5 +94,5 @@ IMPORTANT: Trainings in nnU-Net are not seeded, so you are unlikely to get exact
 ### Training with less compute
 If you want to train a smaller model we recommend:
 
-`nnUNet_n_proc_DA=24 nnUNetv2_train 189 3d_fullres all -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA -num_gpus 1 -p nnUNetResEncUNetMPlans`\
+```nnUNet_n_proc_DA=24 nnUNetv2_train 189 3d_fullres all -tr MotorRegressionTrainer_BCEtopK20Loss_moreDA -num_gpus 1 -p nnUNetResEncUNetMPlans```\
 This should run ~18h on a single A100 and yield around 0.86392 private lb score with threshold 0.25
