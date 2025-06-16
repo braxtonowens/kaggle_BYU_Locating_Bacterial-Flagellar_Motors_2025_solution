@@ -12,9 +12,9 @@ import numpy as np
 import torch
 from batchgenerators.utilities.file_and_folder_operations import join, nifti_files, maybe_mkdir_p, \
     isfile, save_json
-from nnInteractive.utils.erosion_dilation import iterative_3x3_same_padding_pool3d
 from nnunetv2.dataset_conversion.kaggle_byu.official_data_to_nnunet import generate_segmentation
 from nnunetv2.inference.kaggle2025_byu.gaussian_blur_3d import GaussianBlur3D
+from nnunetv2.inference.kaggle2025_byu.iterative_maxpool import iterative_3x3_same_padding_pool3d
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 from nnunetv2.utilities.helpers import empty_cache
 

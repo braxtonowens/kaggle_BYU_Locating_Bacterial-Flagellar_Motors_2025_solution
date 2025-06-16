@@ -13,7 +13,6 @@ from batchgeneratorsv2.helpers.scalar_type import RandomScalar
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
 from batchgeneratorsv2.transforms.utils.deep_supervision_downsampling import DownsampleSegForDSTransform
-from nnInteractive.utils.erosion_dilation import iterative_3x3_same_padding_pool3d
 from torch import distributed as dist, autocast
 from torch import nn
 from torch.nn import functional as F
@@ -22,6 +21,7 @@ from nnunetv2.configuration import default_num_processes
 from nnunetv2.dataset_conversion.kaggle_byu.official_data_to_nnunet import convert_coordinates
 from nnunetv2.evaluation.kaggle2025_byu import compute_f_beta
 from nnunetv2.inference.kaggle2025_byu.gaussian_blur_3d import GaussianBlur3D
+from nnunetv2.inference.kaggle2025_byu.iterative_maxpool import iterative_3x3_same_padding_pool3d
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 from nnunetv2.paths import nnUNet_raw
 from nnunetv2.training.data_augmentation.kaggle_byu_motor_regression import ConvertSegToRegrTarget
