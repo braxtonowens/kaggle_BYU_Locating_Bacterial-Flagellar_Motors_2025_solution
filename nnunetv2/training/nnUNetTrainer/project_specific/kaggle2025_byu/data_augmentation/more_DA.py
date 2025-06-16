@@ -33,11 +33,10 @@ from batchgeneratorsv2.transforms.utils.pseudo2d import Convert3DTo2DTransform
 from batchgeneratorsv2.transforms.utils.random import RandomTransform, OneOfTransform
 from batchgeneratorsv2.transforms.utils.remove_label import RemoveLabelTansform
 from batchgeneratorsv2.transforms.utils.seg_to_regions import ConvertSegmentationToRegionsTransform
-from challenge2025_kaggle_byu_flagellarmotors.instance_seg_to_regression_target.fabians_transform import \
-    ConvertSegToRegrTarget
 
 from nnunetv2.configuration import ANISO_THRESHOLD
 from nnunetv2.training.data_augmentation.compute_initial_patch_size import get_patch_size
+from nnunetv2.training.data_augmentation.kaggle_byu_motor_regression import ConvertSegToRegrTarget
 from nnunetv2.training.nnUNetTrainer.project_specific.kaggle2025_byu.losses.bce_topk import \
     MotorRegressionTrainer_BCEtopK20Loss
 from nnunetv2.training.nnUNetTrainer.variants.data_augmentation.nnUNetTrainerDA5 import \

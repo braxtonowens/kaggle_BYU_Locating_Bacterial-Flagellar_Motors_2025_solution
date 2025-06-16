@@ -5,9 +5,8 @@ from batchgeneratorsv2.helpers.scalar_type import RandomScalar
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
 from batchgeneratorsv2.transforms.utils.deep_supervision_downsampling import DownsampleSegForDSTransform
-from challenge2025_kaggle_byu_flagellarmotors.instance_seg_to_regression_target.fabians_transform import \
-    ConvertSegToRegrTarget
 
+from nnunetv2.training.data_augmentation.kaggle_byu_motor_regression import ConvertSegToRegrTarget
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.training.nnUNetTrainer.project_specific.kaggle2025_byu.losses.bce_topk import \
     MotorRegressionTrainer_BCEtopK20Loss

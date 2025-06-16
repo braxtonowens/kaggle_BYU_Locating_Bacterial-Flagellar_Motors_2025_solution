@@ -107,7 +107,7 @@ if __name__ == "__main__":
     downloaded_data_dir = "/home/isensee/temp/kaggle_byu_additional_data"
     labels_csv          = "/home/isensee/temp/labels.csv"
 
-    target_dataset_name = "Dataset183_Kaggle2025_BYU_FlagMot_BartleysData_384"
+    target_dataset_name = "Dataset181_Kaggle2025_BYU_FlagMot_BartleysData"
     out_dir             = "/home/isensee/temp"
 
     imagesTr = join(out_dir, target_dataset_name, "imagesTr")
@@ -150,7 +150,7 @@ if __name__ == "__main__":
             futures = {
                 ex.submit(
                     process_identifier, iden,
-                    downloaded_data_dir, imagesTr, labelsTr, 384
+                    downloaded_data_dir, imagesTr, labelsTr, 512
                 ): iden for iden in todo
             }
 
