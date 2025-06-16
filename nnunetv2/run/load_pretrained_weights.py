@@ -23,7 +23,7 @@ def load_pretrained_weights(network, fname, verbose=False):
     pretrained_dict = saved_model['network_weights']
 
     skip_strings_in_pretrained = [
-        '.seg_layers.',
+        # '.seg_layers.',
     ]
 
     if isinstance(network, DDP):
