@@ -21,7 +21,7 @@ pip install -e .
 ```
 
 # Inference
-Download the [model checkpoint](https://drive.google.com/drive/folders/1uDLjtfIY0mDbwTPdvL0uWSRZHatJGjsS?usp=sharing) and extract them. 
+Download the [model checkpoint](https://drive.google.com/drive/folders/1uDLjtfIY0mDbwTPdvL0uWSRZHatJGjsS?usp=sharing) and extract it. 
 
 Inference script is provided at [nnunetv2/inference/kaggle2025_byu/inference.py](nnunetv2/inference/kaggle2025_byu/inference.py).
 Provide the path to the downloaded model weights at `--ckpt-dir`
