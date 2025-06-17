@@ -1,5 +1,6 @@
 This repository contains our solution to the [BYU - Locating Bacterial Flagellar Motors 2025](https://www.kaggle.com/competitions/byu-locating-bacterial-flagellar-motors-2025/overview) Kaggle challenge. We achieve a private lb F2 score of 0.87656 and with it the second place in the competition out of >1100 teams.
-Our writeup can be found [here](TODO)
+
+Our writeup can be found [here](https://www.kaggle.com/competitions/byu-locating-bacterial-flagellar-motors-2025/discussion/584980)
 
 The repository you see here is a fork of [nnU-Net](https://github.com/MIC-DKFZ/nnUNet). Please head over there to read more about it.
 
@@ -13,21 +14,22 @@ Some dependencies should be installed manually:
 
 Now you can just clone this repository and install it:
 
-```
+```commandline
 git clone https://github.com/MIC-DKFZ/kaggle_BYU_Locating_Bacterial-Flagellar_Motors_2025_solution.git`
 cd kaggle_BYU_Locating_Bacterial-Flagellar_Motors_2025_solution
 pip install -e .
 ```
 
 # Inference
-Download the [model weights](Todo) and extract them. 
+Download the [model checkpoint](https://drive.google.com/drive/folders/1uDLjtfIY0mDbwTPdvL0uWSRZHatJGjsS?usp=sharing) and extract them. 
 
 Inference script is provided at [nnunetv2/inference/kaggle2025_byu/inference.py](nnunetv2/inference/kaggle2025_byu/inference.py).
 Provide the path to the downloaded model weights at `--ckpt-dir`
 
 (Example provided for test folder from official competition data)
-```commandline
-python inference.py --input-dir /media/isensee/raw_data/bact_motors/official/test \
+```bash
+python inference.py \
+    --input-dir /media/isensee/raw_data/bact_motors/official/test \
     --output-file /media/isensee/raw_data/bact_motors/official/test_out.csv \
     --ckpt-dir /media/isensee/data/results_nnUNet_remake/Dataset189_Kaggle2025_BYU_FlagellarMotors_mergedExternalBartleyNonBartley_512/MotorRegressionTrainer_BCEtopK20Loss_moreDA_3_5kep_EDT25__nnUNetResEncUNetMPlans__3d_fullres_bs16_ps128_256_256 \
     --fold "('all',)"\
@@ -59,7 +61,7 @@ RECOMMENDED: Add these lines to your `.bashrc` file (or whatever you are using) 
 
 
 ## Dataset download
-1. Download the [dataset](Todo). This contains the official challenge data (Dataset142), Bartleys data (Dataset181), our 555 additional cases (Dataset188), our corrected annotations for 142 and 181 (Dataset186) as well as a merged and final dataset that we should be using here (Dataset189). All data was already resized to have the longest edge be 512 pixels and the Motors are encoded as spheres in instance segmentation maps. Don't worry about the many datasets. They link to each other and nothing is duplicated.
+1. Download the [dataset](https://drive.google.com/drive/folders/1uDLjtfIY0mDbwTPdvL0uWSRZHatJGjsS?usp=sharing). This contains the official challenge data (Dataset142), Bartleys data (Dataset181), our 555 additional cases (Dataset188), our corrected annotations for 142 and 181 (Dataset186) as well as a merged and final dataset that we should be using here (Dataset189). All data was already resized to have the longest edge be 512 pixels and the Motors are encoded as spheres in instance segmentation maps. Don't worry about the many datasets. They link to each other and nothing is duplicated.
 2. Extract the MIC_DKFZ_data.7z file into your `$nnUNet_raw` folder so that the DatasetsXXX folders are directly located in there.
 
 ## nnUNet experiment planning and preprocessing
