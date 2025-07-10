@@ -40,7 +40,7 @@ def parse_args():
     p.add_argument(
         '--fold',
         type=ast.literal_eval,
-        help="tuple of fold identifiers, e.g. ('all',) or (0,1,2)"
+        help="tuple of fold identifiers, e.g. \"('all',)\" or (0,1,2)"
     )
     p.add_argument('--threshold', type=float)
     p.add_argument('--min-dist', type=int, default=13)
@@ -87,6 +87,7 @@ def main():
             img = resize_image(img_np, args.edge, DEVICE).float()
             img = (img - img.mean()) / img.std()
 
+            print(f'Predicting tomo of shape {img.shape}')
             out = pred.predict_logits_from_preprocessed_data(img[None], out_device=DEVICE).float()[None]
             out = torch.sigmoid(out)[0, 0]
             coords = torch.argwhere((out == torch.max(out)) & (out > args.threshold))
@@ -122,6 +123,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # python fabian_base_noPostprocess.py --input-dir /media/isensee/raw_data/bact_motors/official/test --output-file /media/isensee/raw_data/bact_motors/official/test_out --fold "('all', )"  --ckpt-dir /home/isensee/drives/checkpoints/nnUNet_results_kaggle2025_byu/Dataset182_Kaggle2025_BYU_FlagellarMotors_mergedExternalBartley/MotorRegressionTrainer_BCEtopK20Loss_moreDA__nnUNetPlans__3d_fullres --threshold 0.21758793969849247c
+    # python fabian_base_noPostprocess.py --input-dir /media/isensee/raw_data/bact_motors/official/dev_mult --output-file /media/isensee/raw_data/bact_motors/official/test_out --fold "('all', )"  --ckpt-dir /home/isensee/drives/checkpoints/nnUNet_results_kaggle2025_byu/Dataset182_Kaggle2025_BYU_FlagellarMotors_mergedExternalBartley/MotorRegressionTrainer_BCEtopK20Loss_moreDA__nnUNetPlans__3d_fullres --threshold 0.21758793969849247c
 
 
