@@ -143,6 +143,8 @@ def main():
                                     'Motor axis 0': xyz[0],
                                     'Motor axis 1': xyz[1],
                                     'Motor axis 2': xyz[2]})
+                    results_json[tomo]['motors'].append(xyz)
+                    results_json[tomo]['pred_motor_likelihood'].append(ps[0])
             print('Found motors')
             print(results_json[tomo])
 
