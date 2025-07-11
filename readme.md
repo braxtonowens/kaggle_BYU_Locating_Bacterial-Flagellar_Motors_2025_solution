@@ -110,3 +110,52 @@ If you want to reproduce all the steps to arrive at the dataset we shared, this 
 - You can merge datasets with [this script](nnunetv2/dataset_conversion/kaggle_byu/merge_datasets.py). 189 is the result of merging 186 with 188. 186 is a corrected version (new labels) of 182 (not provided) which itself was a merger of 142 (official data) and 181 (Bartleys data). Merging datasets just links images and labels. It does not create copies. 
 
 Check out the [napari data inspection tool](https://github.com/MIC-DKFZ/napari-data-inspection). We used it for manual corrections.
+
+# Raw dataset download
+We provide code to download the raw dataset from CZI (except the official cases from Kaggle, those will follow). To do so, 
+navigate to [download_raw_dataset_from_CZI.py](nnunetv2/dataset_conversion/kaggle_byu/download_raw_dataset_from_CZI.py) 
+and execute the function `download_raw_dataset`. It expects a whitelist, i.e. a list that encodes which tomograms to 
+download. You can just take the keys from `train_OrigShapes.json` (see also `if __name__ == "__main__":` in 
+[download_raw_dataset_from_CZI.py](nnunetv2/dataset_conversion/kaggle_byu/download_raw_dataset_from_CZI.py) ). 
+
+In `train_OrigShapes.json`, tomograms are encoded as DATSETID__RUNNAME. This corresponds to how Bartley named his 
+training cases in his original downloader. All `tomo_` entries (which correspond to the official kaggle dataset) will 
+be ignored. The organizers are working on uploading them to CZI as well and we will update the whitelist as soon as they are available.
+
+-> Here is the file with all training coordinates (from which you can also get the whitelist via its keys): [train_coordinates_forOrigShapes.json](nnunetv2/dataset_conversion/kaggle_byu/train_coordinates_forOrigShapes.json)
+
+# Inference with multiple motors
+Simply run the inference script with `--allow_multiple_motors`:
+
+```bash
+python inference.py --input-dir INPUT_DIR \
+  --output-file OUTPUT_CSV_FILE \
+  --ckpt-dir CHECKPOINT_DIR \
+  --fold "('all',)" \
+  --threshold 0.15 \
+  --output_json OUTPUT_JSON_FILE \
+  --allow_multiple_motors
+```
+
+We recommend you set `--output_json`. We find the json output format more convenient to digest + it will give each 
+motor a score. This can be useful for manual inspection.
+Note that these scores are NOT probabilities. They are just the intensity of the regression output at the motor 
+location. Higher means it is most likely a motor. Expect the highest values to be around 0.6, not 1. Always interpret 
+these scores relative to each other or use them for sorting. 
+
+If you notice that there are cluster of detections for a single motor or that motors that are close to each other 
+are not all detected, play with the `--gaussian_sigma` and `--min_dist` flags. Note that the defaults should be fine 
+for most cases, so only deviate if you have to!
+
+`--gaussian_sigma` determines how strongly the predicted blobs are blurred prior to peak detection. This can suppress 
+a noisy output and detection of multiple peaks for a single motor (when setting this higher). Setting this too low 
+will result in several detections for one motor.
+
+`--min_dist` limits how close two detected motors can be to each other. This is implemented via dilation (in a square! 
+Sphere would be preferable but slow as heck) of the blurred predicted blobs, thus suppressing all but the highest peak 
+within the square. Increase if too many detections are observed (for one motor), decrease if you feel that motors that 
+are close to each other are not properly found. 
+
+Note that `--gaussian_sigma` and `--min_dist` influence each other and must be optimized jointly. Again, leave them at 
+default unless you observe issues. If you must, extend the inference script to save the predicted blobs and use this 
+as a guide to make adjustments!
